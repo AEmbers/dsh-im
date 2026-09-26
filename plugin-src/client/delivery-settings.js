@@ -3,6 +3,7 @@ import * as React from 'react';
 import { AccessPolicySettingsPage } from './access-policy-settings.js';
 import { FeishuGroupSettingsPage } from './channels/feishu/group-settings.js';
 import { FeishuVoiceSettingsPage } from './channels/feishu/voice-settings.js';
+import { FeishuSlashPanelSettingsPage } from './channels/feishu/slash-panel-settings.js';
 import { h, isEnglish, localizeText } from './i18n.js';
 
 export const DELIVERY_RPC_CHANNEL = '/dsh-im-delivery';
@@ -30,6 +31,7 @@ export const BOT_SETTINGS_TABS = Object.freeze([
 export const FEISHU_BOT_SETTINGS_TABS = Object.freeze([
   ...BOT_SETTINGS_TABS,
   Object.freeze({ id: 'group', label: '群聊' }),
+  Object.freeze({ id: 'slash', label: '指令面板' }),
   Object.freeze({ id: 'voice', label: '语音交互' }),
 ]);
 
@@ -791,6 +793,11 @@ export function DeliveryTargetSettingsPage({
       })
     : activeTab.id === 'group' && channel === 'feishu'
       ? h(FeishuGroupSettingsPage, {
+          account,
+          rpcCall: accessRpcCall,
+        })
+    : activeTab.id === 'slash' && channel === 'feishu'
+      ? h(FeishuSlashPanelSettingsPage, {
           account,
           rpcCall: accessRpcCall,
         })
