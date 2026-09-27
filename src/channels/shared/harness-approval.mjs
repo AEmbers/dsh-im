@@ -272,6 +272,7 @@ export class HarnessApprovalQueue {
       requiresMention: context.requiresMention === true,
       send,
       render,
+      onResolved: typeof context.onResolved === 'function' ? context.onResolved : null,
       text,
       presented: false,
       presentationTask: null,
@@ -328,8 +329,7 @@ export class HarnessApprovalQueue {
         delivered = await presentationTask.then(() => true, () => false);
       }
       if (shouldNotify && delivered) {
-        pending.resolutionNotified = true;
-        await send(approvalOutcomeText(resolution.outcome)).catch(() => undefined);
+        await this.#notifyResolved(pending, resolution.outcome, send);
       }
     });
     return true;
@@ -347,16 +347,14 @@ export class HarnessApprovalQueue {
           { signal: AbortSignal.timeout(5_000) },
         );
         pending.closedOutcome = 'rejected';
-        if ((pending.presented || pending.deliveryCompleted) && !pending.resolutionNotified) {
-          pending.resolutionNotified = true;
-          await pending.send(approvalOutcomeText('rejected')).catch(() => undefined);
+        if (pending.presented || pending.deliveryCompleted) {
+          await this.#notifyResolved(pending, 'rejected');
         }
       } catch (error) {
         if (error?.code === 'interaction-not-pending') {
           pending.closedOutcome = 'resolved';
-          if ((pending.presented || pending.deliveryCompleted) && !pending.resolutionNotified) {
-            pending.resolutionNotified = true;
-            await pending.send(t(APPROVAL_RESOLVED_TEXT)).catch(() => undefined);
+          if (pending.presented || pending.deliveryCompleted) {
+            await this.#notifyResolved(pending, 'resolved');
           }
         } else {
           this.#logger.warn?.(`[dsh-im:${this.#label}] failed to reject a closing approval:`, error);
@@ -383,9 +381,8 @@ export class HarnessApprovalQueue {
       pending.deliveryCompleted = true;
       if (!pending.inactive) {
         pending.presented = true;
-      } else if (pending.closedOutcome && !pending.resolutionNotified) {
-        pending.resolutionNotified = true;
-        await pending.send(approvalOutcomeText(pending.closedOutcome)).catch(() => undefined);
+      } else if (pending.closedOutcome) {
+        await this.#notifyResolved(pending, pending.closedOutcome);
       }
     } finally {
       if (pending.presentationTask === task) pending.presentationTask = null;
@@ -401,9 +398,7 @@ export class HarnessApprovalQueue {
         const send = pending.send;
         const next = this.#remove(pending);
         await this.#transition(next, async () => {
-          if (!pending.resolutionNotified) {
-            await send(t(APPROVAL_RESOLVED_TEXT)).catch(() => undefined);
-          }
+          await this.#notifyResolved(pending, 'resolved', send);
         });
         return;
       }
@@ -417,10 +412,22 @@ export class HarnessApprovalQueue {
     const send = pending.send;
     const next = this.#remove(pending);
     await this.#transition(next, async () => {
-      if (!pending.resolutionNotified) {
-        await send(approvalOutcomeText(outcome)).catch(() => undefined);
-      }
+      await this.#notifyResolved(pending, outcome, send);
     });
+  }
+
+  async #notifyResolved(pending, outcome, send = pending.send) {
+    if (pending.resolutionNotified) return;
+    // Claim notification before awaiting the channel, so a concurrent close or
+    // resolved event cannot replace the confirmed result or notify twice.
+    pending.resolutionNotified = true;
+    const text = approvalOutcomeText(outcome);
+    try {
+      await pending.onResolved?.(text);
+    } catch (error) {
+      this.#logger.warn?.(`[dsh-im:${this.#label}] failed to update a resolved approval:`, error);
+    }
+    await send(text).catch(() => undefined);
   }
 
   async #transition(next, work) {

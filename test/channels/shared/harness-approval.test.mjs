@@ -14,6 +14,42 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('a failed resolved callback preserves the receipt, FIFO order and duplicate protection', async () => {
+  const warnings = [];
+  const queue = new HarnessApprovalQueue({ logger: { warn: (...args) => warnings.push(args) } });
+  const entries = [];
+  const decisions = [];
+  for (const id of ['first', 'second']) {
+    await queue.handleRequested(interaction({
+      id,
+      toolName: 'write',
+      respond: async (result) => { decisions.push(result); },
+    }), {
+      key: 'direct:actor-a',
+      actor: 'actor-a',
+      send: async (text) => { entries.push({ id, text }); },
+      render: async () => { entries.push({ id, presented: true }); },
+      onResolved: async (text) => {
+        entries.push({ id, resolved: text });
+        throw new Error('card unavailable');
+      },
+    });
+  }
+  await queue.submitByApprovalId('first', 'allowed-once', { actor: 'actor-a' });
+  assert.deepEqual(entries, [
+    { id: 'first', presented: true },
+    { id: 'first', resolved: '已批准，仅对本次操作有效。' },
+    { id: 'first', text: '已批准，仅对本次操作有效。' },
+    { id: 'second', presented: true },
+  ]);
+  assert.equal(await queue.submitByApprovalId('first', 'rejected', { actor: 'actor-a' }), false);
+  assert.equal(decisions.length, 1);
+  assert.equal(warnings.length, 1);
+  await queue.submitByApprovalId('second', 'rejected', { actor: 'actor-a' });
+  assert.deepEqual(decisions.map(({ value }) => value.outcome), ['allowed-once', 'rejected']);
+  assert.deepEqual(entries.at(-1), { id: 'second', text: '已拒绝此次操作。' });
+});
+
 function interaction({
   id,
   toolName,
@@ -276,6 +312,7 @@ test('resolved waits for an in-flight presentation before showing the next appro
   const firstSendStarted = deferred();
   const releaseFirstSend = deferred();
   const sent = [];
+  const resolutionTexts = [];
   const secondResponses = [];
   const firstRequest = queue.handleRequested(interaction({
     id: 'first-resolved',
@@ -284,6 +321,7 @@ test('resolved waits for an in-flight presentation before showing the next appro
   }), {
     key: 'direct:actor-a',
     actor: 'actor-a',
+    onResolved: async (text) => resolutionTexts.push(text),
     send: async (text) => {
       firstSendStarted.resolve();
       await releaseFirstSend.promise;
@@ -331,6 +369,7 @@ test('resolved waits for an in-flight presentation before showing the next appro
     send: async (text) => sent.push(text),
   }).process();
   assert.equal(secondResponses.length, 1);
+  assert.deepEqual(resolutionTexts, ['已拒绝此次操作。']);
 });
 
 test('a next-presentation failure never rewrites an accepted decision as submit failure', async () => {
@@ -381,6 +420,7 @@ test('resolved during submit gives one final outcome even when the HTTP response
   const responseStarted = deferred();
   const releaseResponse = deferred();
   const sent = [];
+  const resolved = [];
   await queue.handleRequested(interaction({
     id: 'resolved-submit',
     toolName: 'bash',
@@ -392,6 +432,7 @@ test('resolved during submit gives one final outcome even when the HTTP response
   }), {
     key: 'direct:actor-a',
     actor: 'actor-a',
+    onResolved: async (text) => resolved.push(text),
     send: async (text) => sent.push(text),
   });
 
@@ -412,6 +453,7 @@ test('resolved during submit gives one final outcome even when the HTTP response
 
   assert.equal(sent.filter((text) => text === '已批准，仅对本次操作有效。').length, 1);
   assert.equal(sent.some((text) => text.includes('审批提交失败')), false);
+  assert.deepEqual(resolved, ['已批准，仅对本次操作有效。']);
 });
 
 test('resolving a blocked next approval preserves the route barrier for later items', async () => {
@@ -748,10 +790,12 @@ test('a failed message-recording preflight cannot block later approval replies',
 test('closing a route rejects every queued approval without presenting hidden items', async () => {
   const queue = new HarnessApprovalQueue({ logger: { warn() {}, error() {} } });
   const sent = [];
+  const resolved = [];
   const responses = [];
   const context = {
     key: 'direct:actor-a',
     actor: 'actor-a',
+    onResolved: async (text) => resolved.push(text),
     send: async (text) => sent.push(text),
   };
   await queue.handleRequested(interaction({
@@ -776,6 +820,7 @@ test('closing a route rejects every queued approval without presenting hidden it
   assert.equal(sent.some((text) => text.includes('first-tool --run')), true);
   assert.equal(sent.some((text) => text.includes('second-tool --run')), false);
   assert.equal(sent.includes('已拒绝此次操作。'), true);
+  assert.deepEqual(resolved, ['已拒绝此次操作。']);
 });
 
 test('closing while a decision is submitting races it with a fail-closed rejection', async () => {
@@ -784,9 +829,11 @@ test('closing while a decision is submitting races it with a fail-closed rejecti
   const releaseAllowed = deferred();
   const outcomes = [];
   const sent = [];
+  const resolved = [];
   const context = {
     key: 'direct:actor-a',
     actor: 'actor-a',
+    onResolved: async (text) => resolved.push(text),
     send: async (text) => sent.push(text),
   };
   await queue.handleRequested(interaction({
@@ -811,6 +858,7 @@ test('closing while a decision is submitting races it with a fail-closed rejecti
   assert.deepEqual(outcomes, ['allowed-once', 'rejected']);
   assert.equal(sent.filter((text) => text === '已拒绝此次操作。').length, 1);
   assert.equal(sent.some((text) => text.includes('审批提交失败')), false);
+  assert.deepEqual(resolved, ['已拒绝此次操作。']);
 });
 
 test('closing during presentation follows a stale prompt with a rejected outcome', async () => {
@@ -818,6 +866,7 @@ test('closing during presentation follows a stale prompt with a rejected outcome
   const presentationStarted = deferred();
   const releasePresentation = deferred();
   const sent = [];
+  const resolved = [];
   const requested = queue.handleRequested(interaction({
     id: 'closing-presentation',
     toolName: 'bash',
@@ -825,6 +874,7 @@ test('closing during presentation follows a stale prompt with a rejected outcome
   }), {
     key: 'direct:actor-a',
     actor: 'actor-a',
+    onResolved: async (text) => resolved.push(text),
     send: async (text) => {
       if (sent.length === 0) {
         presentationStarted.resolve();
@@ -840,11 +890,13 @@ test('closing during presentation follows a stale prompt with a rejected outcome
 
   assert.match(sent[0], /bash --run/);
   assert.equal(sent[1], '已拒绝此次操作。');
+  assert.deepEqual(resolved, ['已拒绝此次操作。']);
 });
 
 test('closing a displayed not-pending approval leaves a resolved notice', async () => {
   const queue = new HarnessApprovalQueue({ logger: { warn() {}, error() {} } });
   const sent = [];
+  const resolved = [];
   await queue.handleRequested(interaction({
     id: 'closing-not-pending',
     toolName: 'bash',
@@ -856,6 +908,7 @@ test('closing a displayed not-pending approval leaves a resolved notice', async 
   }), {
     key: 'direct:actor-a',
     actor: 'actor-a',
+    onResolved: async (text) => resolved.push(text),
     send: async (text) => sent.push(text),
   });
   await queue.closeRoute('direct:actor-a');
@@ -863,4 +916,5 @@ test('closing a displayed not-pending approval leaves a resolved notice', async 
   assert.match(sent[0], /bash --run/);
   assert.equal(sent[1], '该审批已处理，无需再次回复。');
   assert.equal(sent.some((text) => text.includes('已拒绝')), false);
+  assert.deepEqual(resolved, ['该审批已处理，无需再次回复。']);
 });

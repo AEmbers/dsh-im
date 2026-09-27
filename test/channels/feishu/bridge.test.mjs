@@ -2077,11 +2077,12 @@ test('Feishu handles approval replies on the fast lane and presents approvals in
 test('an approval is presented as an interactive card with approve and reject buttons by default', async () => {
   const fixture = stateFixture([['p2p:ou_user', 'session-approval-card']]);
   const sent = [];
+  const patches = [];
   const decisions = [];
   const decided = deferred();
   const bridge = new FeishuHarnessBridge({
     // No interactionCards option: the default (cards on) is under test.
-    client: cardClient(async (outgoing) => sent.push(outgoing)),
+    client: cardClient(async (outgoing) => sent.push(outgoing), async (request) => { patches.push(request); }),
     harness: {
       sessionExists: async () => true,
       createSession: async () => assert.fail('the existing session should be reused'),
@@ -2152,15 +2153,26 @@ test('an approval is presented as an interactive card with approve and reject bu
       outcome: 'allowed-once',
     },
   }]);
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].path.message_id, 'om_card_1');
+  const resolvedCard = JSON.parse(patches[0].data.content);
+  assert.deepEqual(buttonsFromCard(resolvedCard), []);
+  assert.ok(collectVisibleCardText(resolvedCard).includes('已批准，仅对本次操作有效。'));
+  assert.ok(collectVisibleCardText(resolvedCard).includes('需要执行一个危险命令'));
+  await bridge.onCardAction(cardActionEvent('om_card_1', 'reject:approval-card-id', 'ou_user'));
+  assert.equal(decisions.length, 1);
+  assert.equal(patches.length, 1);
+  assert.match(sent.at(-1).content, /该审批已处理或不存在/);
 });
 
 test('approval card reject button submits a rejected outcome', async () => {
   const fixture = stateFixture([['p2p:ou_user', 'session-approval-reject']]);
   const sent = [];
+  const patches = [];
   const decisions = [];
   const decided = deferred();
   const bridge = new FeishuHarnessBridge({
-    client: cardClient(async (outgoing) => sent.push(outgoing)),
+    client: cardClient(async (outgoing) => sent.push(outgoing), async (request) => { patches.push(request); }),
     harness: {
       sessionExists: async () => true,
       createSession: async () => assert.fail('the existing session should be reused'),
@@ -2220,6 +2232,129 @@ test('approval card reject button submits a rejected outcome', async () => {
       outcome: 'rejected',
     },
   }]);
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].path.message_id, 'om_card_1');
+  const resolvedCard = JSON.parse(patches[0].data.content);
+  assert.deepEqual(buttonsFromCard(resolvedCard), []);
+  assert.ok(collectVisibleCardText(resolvedCard).includes('已拒绝此次操作。'));
+});
+
+test('issue #273: approval completion patches the original card across reply and failure paths', async (t) => {
+  for (const scenario of [
+    { name: 'text approval', textReply: true },
+    { name: 'failed submission remains pending until retry', retry: true },
+    { name: 'already handled result is not assumed approved', alreadyHandled: true },
+    { name: 'remote rejection', remote: true },
+    { name: 'patch throws', patchFailure: 'throw' },
+    { name: 'patch returns an error', patchFailure: 'response' },
+    { name: 'queued approvals retain their own card ids', count: 2 },
+  ]) {
+    await t.test(scenario.name, async () => {
+      const sent = [];
+      const patches = [];
+      const decisions = [];
+      const warnings = [];
+      const finished = deferred();
+      const ready = deferred();
+      let attempts = 0;
+      let interactionOptions;
+      const count = scenario.count ?? 1;
+      const bridge = new FeishuHarnessBridge({
+        client: cardClient(async (outgoing) => { sent.push(outgoing); }, async (request) => {
+          patches.push(request);
+          if (scenario.patchFailure === 'throw') throw new Error('patch failed');
+          return { code: scenario.patchFailure === 'response' ? 999 : 0 };
+        }),
+        harness: {
+          sessionExists: async () => true,
+          ask: async (sessionId, _text, options) => {
+            interactionOptions = options;
+            for (let index = 0; index < count; index++) {
+              const id = `approval-273-${index}`;
+              await options.onInteraction({
+                kind: 'approval', interactionId: id, rpcId: `rpc-${id}`, sessionId,
+                payload: {
+                  type: 'approval/requested', sessionId, approvalId: id,
+                  toolName: 'write', callId: `call-${id}`, reason: `reason-${index}`,
+                },
+                toolCall: {
+                  callId: `call-${id}`, name: 'write',
+                  arguments: JSON.stringify({ file_path: `/tmp/approval-${index}.txt`, content: 'hello' }),
+                },
+                respond: async (result) => {
+                  attempts += 1;
+                  if (scenario.retry && attempts === 1) throw new Error('temporary submission failure');
+                  if (scenario.alreadyHandled) {
+                    throw Object.assign(new Error('resolved elsewhere'), { code: 'interaction-not-pending' });
+                  }
+                  decisions.push(result);
+                },
+              });
+            }
+            ready.resolve();
+            await finished.promise;
+            return 'done';
+          },
+        },
+        state: stateFixture([['p2p:ou_user', 'session-273']]).state,
+        status: bridgeStatus(),
+        allowedSenderOpenIds: new Set(['ou_user']),
+        logger: { info() {}, warn: (...args) => warnings.push(args), error() {} },
+      });
+      const turn = bridge.accept(event('approval-273-start', 'request approval'));
+      try {
+        await ready.promise;
+        assert.equal(cards(sent).length, 1, 'only the head approval is presented');
+        for (let index = 0; index < count; index++) {
+          const id = `approval-273-${index}`;
+          // cardClient assigns message ids to both text and card messages.
+          const messageId = `om_card_${sent.findIndex(({ content, msgType }) => (
+            msgType === 'interactive' && JSON.stringify(content).includes(`approve:${id}`)
+          )) + 1}`;
+          const click = (action) => bridge.onCardAction(cardActionEvent(messageId, `${action}:${id}`, 'ou_user'));
+          if (scenario.retry) {
+            await click('approve');
+            assert.equal(attempts, 1);
+            assert.deepEqual(decisions, []);
+            assert.deepEqual(patches, [], 'failed submission must not mark the card approved');
+            assert.match(sent.at(-1).content, /审批提交失败/);
+          }
+          const expected = scenario.remote || index > 0 ? '已拒绝此次操作。'
+            : scenario.alreadyHandled ? '该审批已处理，无需再次回复。'
+              : '已批准，仅对本次操作有效。';
+          if (scenario.textReply) {
+            await bridge.accept(event('approval-273-text', '批准'));
+          } else if (scenario.remote) {
+            await interactionOptions.onInteractionResolved({ kind: 'approval', interactionId: id, outcome: 'rejected' });
+          } else {
+            await click(index > 0 ? 'reject' : 'approve');
+          }
+          assert.equal(patches.length, index + 1);
+          assert.equal(patches[index].path.message_id, messageId);
+          const updated = JSON.parse(patches[index].data.content);
+          assert.deepEqual(buttonsFromCard(updated), []);
+          const visible = collectVisibleCardText(updated);
+          assert.ok(visible.includes(expected));
+          assert.ok(visible.includes(`reason-${index}`));
+          assert.ok(visible.includes(`/tmp/approval-${index}.txt`));
+          assert.ok(sent.some(({ msgType, content }) => msgType === 'text' && JSON.parse(content).text === expected));
+          const decisionCount = decisions.length;
+          await click('reject');
+          assert.equal(decisions.length, decisionCount, 'a stale click must not decide the next approval');
+          assert.equal(patches.length, index + 1);
+          assert.match(sent.at(-1).content, /该审批已处理或不存在/);
+        }
+        assert.equal(decisions.length, scenario.remote || scenario.alreadyHandled ? 0 : count);
+        assert.equal(cards(sent).length, count, 'patch failure must not create a replacement card');
+        if (scenario.patchFailure) {
+          assert.ok(warnings.some((args) => args[0].includes('resolved interaction card patch failed')));
+        }
+      } finally {
+        finished.resolve();
+        await turn;
+      }
+    });
+  }
 });
 
 test('a single-choice question is presented as a card with option buttons by default', async () => {
@@ -2300,10 +2435,12 @@ test('a single-choice question is presented as a card with option buttons by def
 test('an interaction card falls back to plain text when the card send fails', async () => {
   const fixture = stateFixture([['p2p:ou_user', 'session-approval-fallback']]);
   const sent = [];
+  const patches = [];
   const decisions = [];
   const decided = deferred();
   const failingCard = {
     im: { v1: { message: {
+      patch: async (request) => { patches.push(request); return { code: 0 }; },
       create: async (request) => {
         if (request.data.msg_type === 'interactive') {
           throw new Error('card disabled');
@@ -2371,6 +2508,7 @@ test('an interaction card falls back to plain text when the card send fails', as
       outcome: 'allowed-once',
     },
   }]);
+  assert.deepEqual(patches, []);
 });
 
 test('a resolved question remembers the text fallback message after its card send fails', async () => {
@@ -2456,10 +2594,11 @@ test('a resolved question remembers the text fallback message after its card sen
 test('a different allowed group member cannot approve or answer an interaction card', async () => {
   const fixture = stateFixture([['group:oc_group', 'session-group-actor']]);
   const sent = [];
+  const patches = [];
   const decisions = [];
   const decided = deferred();
   const bridge = new FeishuHarnessBridge({
-    client: cardClient(async (outgoing) => sent.push(outgoing)),
+    client: cardClient(async (outgoing) => sent.push(outgoing), async (request) => { patches.push(request); }),
     harness: {
       sessionExists: async () => true,
       createSession: async () => assert.fail('the existing session should be reused'),
@@ -2509,6 +2648,7 @@ test('a different allowed group member cannot approve or answer an interaction c
     cardActionEvent('om_card_1', 'approve:approval-actor-bound', 'ou_member'),
   );
   assert.deepEqual(decisions, [], 'another allowed member must not approve');
+  assert.deepEqual(patches, [], 'another allowed member must not update the card');
 
   // The originating actor's click does go through.
   await bridge.onCardAction(
@@ -2523,6 +2663,11 @@ test('a different allowed group member cannot approve or answer an interaction c
       outcome: 'allowed-once',
     },
   }]);
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].path.message_id, 'om_card_1');
+  const resolvedCard = JSON.parse(patches[0].data.content);
+  assert.deepEqual(buttonsFromCard(resolvedCard), []);
+  assert.ok(collectVisibleCardText(resolvedCard).includes('已批准，仅对本次操作有效。'));
 });
 
 test('a stale question card cannot answer the next question in a multi-question interaction', async () => {
@@ -7583,6 +7728,7 @@ test('pending question blocks card steer and card stop cancels the question', as
 test('pending approval blocks card steer and card stop rejects the approval', async () => {
   const fixture = stateFixture([['p2p:ou_owner', 'session-active']]);
   const sent = [];
+  const patches = [];
   const approvalReady = deferred();
   const decided = deferred();
   const { calls, harness } = activeTurnHarness();
@@ -7617,7 +7763,7 @@ test('pending approval blocks card steer and card stop rejects the approval', as
     throw error;
   };
   const bridge = new FeishuHarnessBridge({
-    client: cardClient(async (outgoing) => sent.push(outgoing)),
+    client: cardClient(async (outgoing) => sent.push(outgoing), async (request) => { patches.push(request); }),
     channel: {},
     harness,
     state: fixture.state,
@@ -7650,6 +7796,11 @@ test('pending approval blocks card steer and card stop rejects the approval', as
       outcome: 'rejected',
     },
   });
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].path.message_id, 'om_card_2');
+  const resolvedCard = JSON.parse(patches[0].data.content);
+  assert.deepEqual(buttonsFromCard(resolvedCard), []);
+  assert.ok(collectVisibleCardText(resolvedCard).includes('已拒绝此次操作。'));
 });
 
 test('menu stop button stops the bound active turn without touching the model', async () => {

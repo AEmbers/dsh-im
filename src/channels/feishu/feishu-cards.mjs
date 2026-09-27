@@ -877,7 +877,7 @@ export function customSteerCard() {
  * `requiresMention` is advisory; a button click is itself the operator's
  * explicit intent, so it does not need an @ mention in groups.
  */
-export function approvalCard({ toolName, operation, reason, approvalId }) {
+export function approvalCard({ toolName, operation, reason, approvalId, resolvedText }) {
   const elements = [];
   if (toolName) {
     elements.push({ tag: 'div', text: markdown(t('工具：{tool}', { tool: String(toolName) })) });
@@ -898,7 +898,9 @@ export function approvalCard({ toolName, operation, reason, approvalId }) {
   }
   elements.push(
     { tag: 'hr' },
-    buttonPair(t('✅ 批准'), `approve:${approvalId}`, t('❌ 拒绝'), `reject:${approvalId}`),
+    resolvedText
+      ? { tag: 'div', text: markdown(resolvedText) }
+      : buttonPair(t('✅ 批准'), `approve:${approvalId}`, t('❌ 拒绝'), `reject:${approvalId}`),
   );
   return cardWith(t('🔐 工具审批'), elements);
 }

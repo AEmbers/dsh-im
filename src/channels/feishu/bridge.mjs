@@ -2917,7 +2917,7 @@ export class FeishuHarnessBridge {
   }
 
   /**
-   * issue #162：已答状态卡的原地替换。patch 失败仅记录警告并明确降级——
+   * 已处理交互卡的原地替换。patch 失败仅记录警告并明确降级——
    * 回执缺失不应影响答案提交，也不得像 #sendCard 那样回退成发送新卡。
    */
   async #patchCardMessage(chatId, messageId, cardJson) {
@@ -2932,7 +2932,7 @@ export class FeishuHarnessBridge {
       }
       return messageId;
     } catch (error) {
-      this.#logger.warn?.('[dsh-feishu] answered-state card patch failed:', error?.message ?? error);
+      this.#logger.warn?.('[dsh-feishu] resolved interaction card patch failed:', error?.message ?? error);
       return null;
     }
   }
@@ -5805,6 +5805,8 @@ export class FeishuHarnessBridge {
     requiresMention,
     replyToMessageId,
   }) {
+    let approvalCardMessageId = null;
+    let approvalCardData = null;
     if (await this.#approvals.handleRequested(interaction, {
       key,
       actor,
@@ -5816,15 +5818,16 @@ export class FeishuHarnessBridge {
       ...(this.#interactionCards
         ? {
             render: async (pending) => {
-              // Show the approval as an interactive card with approve/reject buttons.
-              await this.#sendCard(
+              // Keep the original card details and id with this approval's callbacks.
+              approvalCardData = {
+                toolName: pending.toolCall?.name ?? pending.interaction.payload.toolName,
+                operation: operationArguments(pending.toolCall),
+                reason: pending.interaction.payload.reason,
+                approvalId: pending.approvalId,
+              };
+              approvalCardMessageId = await this.#sendCard(
                 chatId,
-                approvalCard({
-                  toolName: pending.toolCall?.name ?? pending.payload?.toolName,
-                  operation: operationArguments(pending.toolCall),
-                  reason: pending.payload?.reason,
-                  approvalId: pending.approvalId,
-                }),
+                approvalCard(approvalCardData),
                 { key, replyTo: replyToMessageId },
               ).catch(async () => {
                 // Fall back to the plain-text approval if the card cannot be
@@ -5832,7 +5835,16 @@ export class FeishuHarnessBridge {
                 // the pending approval is not marked as presented and the
                 // existing retry/reconnect logic can run.
                 await this.#send(chatId, pending.text, { replyTo: replyToMessageId });
+                return null;
               });
+            },
+            onResolved: async (resolvedText) => {
+              if (!approvalCardMessageId) return;
+              await this.#patchCardMessage(
+                chatId,
+                approvalCardMessageId,
+                approvalCard({ ...approvalCardData, resolvedText }),
+              );
             },
           }
         : {}),

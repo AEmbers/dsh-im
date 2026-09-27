@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   answeredQuestionCard,
+  approvalCard,
   countMarkdownTables,
   splitStepStreamCardBlocks,
   stepStreamCard,
@@ -22,6 +23,31 @@ import {
   workspaceListCard,
 } from '../../../src/channels/feishu/feishu-cards.mjs';
 import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
+
+test('approval cards replace actions with the resolved text and preserve operation details', () => {
+  const details = {
+    toolName: 'write',
+    operation: '{"file_path":"/tmp/approval-test.txt","content":"hello"}',
+    reason: 'outside the workspace',
+    approvalId: 'private-approval-id',
+  };
+  const pending = JSON.parse(approvalCard(details));
+  assert.deepEqual(buttons(pending).map((button) => button.behaviors[0].value.action), [
+    'approve:private-approval-id', 'reject:private-approval-id',
+  ]);
+  for (const resolvedText of [
+    '已批准，仅对本次操作有效。',
+    '已拒绝此次操作。',
+    '该审批已处理，无需再次回复。',
+    'Approved — valid for this operation only.',
+  ]) {
+    const resolved = JSON.parse(approvalCard({ ...details, resolvedText }));
+    assert.deepEqual(buttons(resolved), []);
+    assert.equal(JSON.stringify(resolved).includes(details.approvalId), false);
+    assert.deepEqual(resolved.body.elements.slice(0, -1), pending.body.elements.slice(0, -1));
+    assert.ok(JSON.stringify(resolved).includes(resolvedText));
+  }
+});
 
 function buttons(value, result = []) {
   if (Array.isArray(value)) {
