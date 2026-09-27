@@ -591,6 +591,26 @@
       ]
     },
     {
+      "login": "rosalynthompson32-a11y",
+      "name": "Biertolovisk",
+      "avatar_url": "https://avatars.githubusercontent.com/u/313334391",
+      "profile": "https://github.com/rosalynthompson32-a11y",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/271"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/271"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/271"
+        }
+      ]
+    },
+    {
       "login": "ShawnKung",
       "name": "ShawnKung",
       "avatar_url": "https://avatars.githubusercontent.com/u/42027195",
