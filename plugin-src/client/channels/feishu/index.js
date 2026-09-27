@@ -18,7 +18,6 @@ import {
 } from "./api.js";
 import { useAnimationFrameScheduler } from "../../lifecycle.js";
 import { WorkspaceEditor } from "../../workspace-editor.js";
-import { VoiceEditor } from "./voice-editor.js";
 import { ContextEnhancementEditor } from "../../context-enhancement.js";
 import {
   AgentPresetCatalogContext,
@@ -572,7 +571,6 @@ export function BotCard({
   onContextEnhancementSave,
   onStepPushSave,
   onStepPushModeSave,
-  onVoiceSave,
   onRequestRemove,
   onConfirmRemove,
   onCancelRemove,
@@ -666,11 +664,6 @@ export function BotCard({
         disabled: Boolean(busy),
         onSave: onStepPushSave,
         onModeSave: onStepPushModeSave,
-      }),
-      h(VoiceEditor, {
-        value: connection.voice,
-        disabled: Boolean(busy),
-        onSave: onVoiceSave,
       }),
       provisionContent
         ? h("section", {
@@ -768,7 +761,6 @@ function BotList(props) {
           onContextEnhancementSave: (config) => props.onContextEnhancementSave(bot, config),
           onStepPushSave: (stepPush) => props.onStepPushSave(bot, stepPush),
           onStepPushModeSave: (stepPushMode) => props.onStepPushModeSave(bot, stepPushMode),
-          onVoiceSave: (voice) => props.onVoiceSave(bot, voice),
           onRequestRemove: () => props.onRequestRemove(bot),
           onConfirmRemove: () => props.onConfirmRemove(bot),
           onCancelRemove: props.onCancelRemove,
@@ -1577,9 +1569,6 @@ export function FeishuSettingsTab({ rpcCall }) {
                   ),
                   onStepPushModeSave: (connection, stepPushMode) => saveBotSetting(
                     connection, "step-push-mode", FEISHU_ENDPOINTS.setStepPushMode, { stepPushMode },
-                  ),
-                  onVoiceSave: (connection, voice) => saveBotSetting(
-                    connection, "voice", FEISHU_ENDPOINTS.setVoice, { voice },
                   ),
                   onRequestRemove: requestRemove,
                   onConfirmRemove: (bot) => void confirmRemove(bot),

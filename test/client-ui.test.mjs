@@ -682,7 +682,6 @@ test('Feishu bot settings render one step-push select with four presentations', 
     stepPushSelect().findAllByType('option').map((option) => option.props.value),
     ['off', 'live_cot', 'streaming_card', 'post'],
   );
-  // 语音交互的关闭态说明共用同一 class,这里只断言分步直推自己的帮助文案。
   const helpNodes = renderer.root.findAll(
     (node) => node.props?.className === 'dim-feishuGroupHelp',
   );

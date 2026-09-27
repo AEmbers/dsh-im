@@ -113,6 +113,7 @@ test('delivery settings define only the ten supported IM channel routes', () => 
     { id: 'delivery', label: '投递设置' },
     { id: 'access', label: '访问设置' },
     { id: 'group', label: '群聊' },
+    { id: 'voice', label: '语音交互' },
   ]);
   assert.equal(botSettingsTabsForChannel('weixin'), BOT_SETTINGS_TABS);
   assert.equal(botSettingsTabsForChannel('dingtalk'), BOT_SETTINGS_TABS);
@@ -201,6 +202,7 @@ test('robot card settings toggle expands in place and more settings preserves th
       assert.equal(opened.length, 1);
       assert.equal(opened[0].channel, channel);
       assert.equal(opened[0].botId, account.botId);
+      assert.equal(renderer.root.findAllByProps({ 'aria-label': '语音交互开关' }).length, 0);
       act(() => toggle.props.onClick({ stopPropagation() {} }));
       assert.equal(toggle.props['aria-expanded'], 'false');
     } finally {
@@ -309,7 +311,7 @@ test('expanded card more settings opens a bot-scoped page and returns in place',
   assert.equal(renderer.root.findByProps({ id: 'dim-tab-weixin' }).props['aria-selected'], true);
 });
 
-test('only Feishu adds a group tab and it contains only the two migrated controls', async (t) => {
+test('Feishu more settings has separate group and voice tabs, with only group controls in the group tab', async (t) => {
   const previousWindow = globalThis.window;
   globalThis.window = {
     setInterval() { return 1; },
@@ -372,7 +374,7 @@ test('only Feishu adds a group tab and it contains only the two migrated control
 
   const page = renderer.root.findByProps({ className: 'dim-deliveryPage' });
   assert.deepEqual(page.findAllByProps({ role: 'tab' }).map(textOf), [
-    '投递设置', '访问设置', '群聊',
+    '投递设置', '访问设置', '群聊', '语音交互',
   ]);
   await act(async () => {
     button(page, '群聊').props.onClick();
@@ -385,6 +387,109 @@ test('only Feishu adds a group tab and it contains only the two migrated control
   assert.doesNotMatch(textOf(groupSettings), /这些设置只影响|刷新群聊设置/);
   assert.equal(groupSettings.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'all');
   assert.equal(groupSettings.findByProps({ 'aria-label': '群聊以话题方式回复' }).props.value, 'on');
+});
+
+test('voice tab loads and saves the selected bot, preserves advanced options, and reloads after switching tabs', async (t) => {
+  let voice = {
+    enabled: true,
+    secretRef: 'BOT_DASHSCOPE_KEY',
+    asrModel: 'qwen3-asr-flash',
+    ttsModel: 'qwen3-tts-flash',
+    ttsVoice: 'Serena',
+    asrBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    ffmpeg: '/opt/homebrew/bin/ffmpeg',
+  };
+  const initialVoice = { ...voice };
+  const calls = [];
+  const renderer = await mount(t, {
+    channel: 'feishu',
+    account: connectedAccount,
+    rpcCall: async () => ({ ok: true, value: { targets: [] } }),
+    accessRpcCall: async (endpoint, payload) => {
+      calls.push({ endpoint, payload });
+      if (endpoint === FEISHU_ENDPOINTS.setVoice) voice = payload.voice;
+      else assert.equal(endpoint, FEISHU_ENDPOINTS.status);
+      return { ok: true, value: { bots: [
+        { botId: 'other_bot', voice: null },
+        { botId: connectedAccount.botId, voice },
+      ] } };
+    },
+    onBack() {},
+  });
+  const switchTab = async (label) => act(async () => {
+    button(renderer.root, label).props.onClick();
+    await flush();
+  });
+  const voiceInput = () => renderer.root.findByProps({ placeholder: 'Momo' });
+
+  assert.equal(calls.length, 0);
+  await switchTab('语音交互');
+  assert.equal(renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.value, 'on');
+  assert.equal(renderer.root.findByProps({ placeholder: 'DASHSCOPE_API_KEY' }).props.value, 'BOT_DASHSCOPE_KEY');
+  assert.equal(voiceInput().props.value, 'Serena');
+  await act(async () => voiceInput().props.onChange({ target: { value: 'Cherry' } }));
+  await act(async () => {
+    button(renderer.root, '保存语音设置').props.onClick();
+    await flush();
+  });
+  assert.deepEqual(calls.at(-1), {
+    endpoint: FEISHU_ENDPOINTS.setVoice,
+    payload: { botId: connectedAccount.botId, voice: { ...initialVoice, ttsVoice: 'Cherry' } },
+  });
+
+  await switchTab('投递设置');
+  assert.equal(renderer.root.findAllByProps({ 'aria-label': '语音交互开关' }).length, 0);
+  await switchTab('语音交互');
+  assert.equal(calls.filter(({ endpoint }) => endpoint === FEISHU_ENDPOINTS.status).length, 2);
+  assert.equal(voiceInput().props.value, 'Cherry');
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.onChange({ target: { value: 'off' } });
+    await flush();
+  });
+  assert.deepEqual(calls.at(-1), {
+    endpoint: FEISHU_ENDPOINTS.setVoice,
+    payload: { botId: connectedAccount.botId, voice: null },
+  });
+  await switchTab('投递设置');
+  await switchTab('语音交互');
+  assert.equal(renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.value, 'off');
+});
+
+test('voice tab offers a retry when the current bot is missing and shows save failures', async (t) => {
+  let available = false;
+  const renderer = await mount(t, {
+    channel: 'feishu',
+    account: connectedAccount,
+    rpcCall: async () => ({ ok: true, value: { targets: [] } }),
+    accessRpcCall: async (endpoint) => {
+      if (endpoint === FEISHU_ENDPOINTS.setVoice) {
+        return { ok: false, error: { message: '语音设置保存失败，请重试。' } };
+      }
+      assert.equal(endpoint, FEISHU_ENDPOINTS.status);
+      return { ok: true, value: { bots: available ? [{ botId: connectedAccount.botId }] : [] } };
+    },
+    onBack() {},
+  });
+  await act(async () => {
+    button(renderer.root, '语音交互').props.onClick();
+    await flush();
+  });
+  assert.match(textOf(renderer.root.findByProps({ role: 'alert' })), /未找到当前飞书机器人/);
+  assert.equal(renderer.root.findAllByProps({ 'aria-label': '语音交互开关' }).length, 0);
+  available = true;
+  await act(async () => {
+    button(renderer.root, '重新读取').props.onClick();
+    await flush();
+  });
+  await act(async () => {
+    renderer.root.findByProps({ 'aria-label': '语音交互开关' }).props.onChange({ target: { value: 'on' } });
+  });
+  await act(async () => {
+    button(renderer.root, '保存语音设置').props.onClick();
+    await flush();
+  });
+  assert.equal(textOf(renderer.root.findByProps({ role: 'alert' })), '语音设置保存失败，请重试。');
+  assert.equal(button(renderer.root, '保存语音设置').props.disabled, false);
 });
 
 test('access settings preserve independent mode drafts and save direct and group atomically', async (t) => {
@@ -412,7 +517,7 @@ test('access settings preserve independent mode drafts and save direct and group
     await flush();
   });
 
-  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 3);
+  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 4);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessScene' }).length, 2);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessOwnerNotice' }).length, 0);
   assert.equal(accessHelpButtons(renderer.root).length, 2);
@@ -959,7 +1064,7 @@ test('recent conversation names remain platform data in the English UI', async (
   );
   assert.deepEqual(
     renderer.root.findAllByProps({ role: 'tab' }).map(textOf),
-    ['Delivery settings', 'Access settings', 'Group'],
+    ['Delivery settings', 'Access settings', 'Group', 'Voice'],
   );
 });
 
