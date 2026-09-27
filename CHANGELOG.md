@@ -6,6 +6,29 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.29.0] - 2026-09-28
+
+### Added / 新增
+
+- 飞书新增默认关闭、按机器人启用的语音交互：语音提问经 ASR 转写后进入现有文字处理流程，同回合答案在保留文字回复的同时可合成为语音，包含分步流式卡片完成后的语音回复。转写后继续执行命令权限检查，语音回合按会话隔离，避免同群不同话题之间串音。感谢 [@rosalynthompson32-a11y](https://github.com/rosalynthompson32-a11y)（[#271](https://github.com/xmanrui/dsh-im/pull/271)）。
+  Added optional, per-bot Feishu voice interaction, disabled by default. ASR transcripts enter the existing text pipeline, and the same turn's answer can be spoken alongside its text reply, including after step-streaming cards finish. Transcribed commands retain permission checks, while voice turns are isolated per Session to prevent cross-topic replies. Thanks to [@rosalynthompson32-a11y](https://github.com/rosalynthompson32-a11y) ([#271](https://github.com/xmanrui/dsh-im/pull/271)).
+- 飞书机器人「更多设置」新增「语音交互」页，可配置凭据引用、ASR/TTS 模型和音色；刷新后恢复已保存配置，关闭开关立即保存。密钥由宿主凭据库解析，配置只保存引用名称。
+  Added a Voice Interaction tab in Feishu bot More Settings for the credential reference, ASR/TTS models, and voice. Saved settings survive refresh, disabling is persisted immediately, and configuration stores only a reference to the credential resolved by the Host.
+
+### Fixed / 修复
+
+- 飞书审批在批准、拒绝或已处理后更新原卡片，用结果文字替换操作按钮并保留工具、参数和原因；按钮与文字审批均生效，继续保留原有文字回执。卡片更新失败不会重新提交审批，也不阻断后续审批（[#273](https://github.com/xmanrui/dsh-im/issues/273)）。
+  Feishu approvals now update the original card after approval, rejection, or resolution, replacing action buttons with the outcome while retaining tool details, arguments, and reason. Both button and text decisions retain the existing text receipt. Card-update failures neither resubmit the decision nor block later approvals ([#273](https://github.com/xmanrui/dsh-im/issues/273)).
+- 邮件审批等待场景的回归测试改为等待实际轮询条件，减少繁忙环境下固定延时造成的偶发失败（[#272](https://github.com/xmanrui/dsh-im/pull/272)）。
+  The email pending-approval regression now waits for the actual polling condition, reducing timing-related failures caused by a fixed delay under load ([#272](https://github.com/xmanrui/dsh-im/pull/272)).
+
+### Notes / 使用说明
+
+- 语音交互需要自行准备可用的 ffmpeg 和 DashScope 凭据；默认使用 `qwen3-asr-flash`、`qwen3-tts-flash` 与 `Momo` 音色。启用后，音频会发往所配置的 ASR 服务，回复文本会发往 DashScope TTS；TTS 仅取空白归一化后的前 600 个字符。转写失败时保留不支持类型提示，语音合成失败不影响已发送的文字回复；缺失 ffmpeg 不会导致宿主进程崩溃。npm 安装不会自动安装 ffmpeg。
+  Voice interaction requires an available ffmpeg installation and DashScope credential. Defaults are `qwen3-asr-flash`, `qwen3-tts-flash`, and the `Momo` voice. When enabled, audio is sent to the configured ASR service and reply text to DashScope TTS; speech uses only the first 600 characters after whitespace normalization. Transcription failures retain the unsupported-type notice, speech failures leave delivered text intact, and missing ffmpeg does not crash the Host. npm installation does not install ffmpeg.
+- 审批卡修复不批量更新旧版本或进程重启前已发出的历史卡片。宿主兼容性声明仍为 DSH 0.1.7-alpha.1；升级后请重启 Host 并刷新设置页。
+  The approval fix does not retroactively update cards from older versions or before a process restart. Host compatibility remains declared for DSH 0.1.7-alpha.1; restart the Host and refresh settings after upgrading.
+
 ## [4.28.1] - 2026-09-25
 
 ### Fixed / 修复
@@ -1304,7 +1327,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.28.1...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.29.0...HEAD
+[4.29.0]: https://github.com/xmanrui/dsh-im/compare/v4.28.1...v4.29.0
 [4.28.1]: https://github.com/xmanrui/dsh-im/compare/v4.28.0...v4.28.1
 [4.28.0]: https://github.com/xmanrui/dsh-im/compare/v4.27.0...v4.28.0
 [4.27.0]: https://github.com/xmanrui/dsh-im/compare/v4.26.0...v4.27.0
