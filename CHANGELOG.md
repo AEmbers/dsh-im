@@ -6,6 +6,18 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.29.1] - 2026-09-28
+
+### Changed / 变更
+
+- 新增渐变消息连接图标，并通过 `package.json` 的 `icon` 字段声明；图标资源随 npm 包发布，供支持该元数据的插件界面展示。
+  Added a gradient message-link icon declared through the `icon` field in `package.json`. The asset is included in the npm package for plugin interfaces that support this metadata.
+
+### Compatibility / 兼容性
+
+- 本次仅更新插件图标与包元数据，不改变渠道行为、配置、依赖声明或宿主兼容性范围；DSH 兼容性声明保持 0.1.7-alpha.1。
+  This release only updates the plugin icon and package metadata. Channel behavior, configuration, dependency declarations, and the Host compatibility range are unchanged; DSH compatibility remains declared for 0.1.7-alpha.1.
+
 ## [4.29.0] - 2026-09-28
 
 ### Added / 新增
@@ -1327,7 +1339,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.29.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.29.1...HEAD
+[4.29.1]: https://github.com/xmanrui/dsh-im/compare/v4.29.0...v4.29.1
 [4.29.0]: https://github.com/xmanrui/dsh-im/compare/v4.28.1...v4.29.0
 [4.28.1]: https://github.com/xmanrui/dsh-im/compare/v4.28.0...v4.28.1
 [4.28.0]: https://github.com/xmanrui/dsh-im/compare/v4.27.0...v4.28.0

@@ -333,7 +333,7 @@ test('Feishu more settings has separate group and voice tabs, with only group co
     configured: true,
     state: 'connected',
     groupResponseMode: 'all',
-    groupTopicReply: true,
+    mentionTopicReply: true,
     groupMessagePermissionGranted: true,
     bot: { name: '群聊设置机器人', appIdMasked: 'cli_group••••test' },
     health: { status: 'healthy', summary: '长连接运行正常', lastCheckedAt: Date.now() },
@@ -389,7 +389,7 @@ test('Feishu more settings has separate group and voice tabs, with only group co
   assert.equal(groupSettings.findAllByType('h2').length, 0);
   assert.doesNotMatch(textOf(groupSettings), /这些设置只影响|刷新群聊设置/);
   assert.equal(groupSettings.findByProps({ 'aria-label': '群聊响应方式' }).props.value, 'all');
-  assert.equal(groupSettings.findByProps({ 'aria-label': '群聊以话题方式回复' }).props.value, 'on');
+  assert.equal(groupSettings.findByProps({ 'aria-label': '被 @ 时以话题方式回复' }).props.value, 'on');
 });
 
 test('voice tab loads and saves the selected bot, preserves advanced options, and reloads after switching tabs', async (t) => {

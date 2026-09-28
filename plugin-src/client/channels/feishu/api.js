@@ -37,7 +37,7 @@ export const FEISHU_ENDPOINTS = Object.freeze({
   setAccessPolicy: "bot.access-policy.set",
   setAlias: 'bot.alias.set',
   setGroupResponseMode: "bot.group-response-mode.set",
-  setGroupTopicReply: "bot.group-topic-reply.set",
+  setMentionTopicReply: "bot.mention-topic-reply.set",
   setStepPush: "bot.step-push.set",
   setStepPushMode: "bot.step-push-mode.set",
   setVoice: "bot.voice.set",
@@ -228,7 +228,7 @@ export function normalizeBotConnection(value, fallbackBotId) {
       ? { accessPolicy: normalizeAccessPolicy(value.accessPolicy) }
       : {}),
     groupResponseMode: normalizeGroupResponseMode(value.groupResponseMode),
-    groupTopicReply: value.groupTopicReply === true,
+    mentionTopicReply: value.mentionTopicReply !== false,
     stepPush: value.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(value.stepPushMode),
     voice: normalizeFeishuVoiceConfig(value.voice),
