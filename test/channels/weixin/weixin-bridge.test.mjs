@@ -2596,3 +2596,214 @@ test('Weixin refuses /batch while the existing conversation queue is running', a
   await bridge.accept(message('busy-send', '/send'));
   assert.match(sent.at(-1), /没有待提交的批量内容/);
 });
+
+// 19-digit iLink message ids whose high bits encode a known instant, the same
+// shape and magnitude as a live id, so the fallback clock is exactly asserted.
+const SENT_AT_MESSAGE_ID = '7510231823155200000';        // 2026-09-28 15:00:00 +08:00
+const SENT_AT_LATER_MESSAGE_ID = '7510254661140480000';  // 2026-09-28 16:30:45 +08:00
+
+/**
+ * `sentAt` renders in the Host's local zone, so the expectation is derived in
+ * the zone the test runs in rather than hard-coded to UTC+8 (CI runs in UTC).
+ */
+function localStamp(ms) {
+  const date = new Date(ms);
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** Flatten a prompt, whether it reached `ask` as a string or as parts. */
+function promptText(content) {
+  return typeof content === 'string'
+    ? content
+    : content.map((part) => String(part.text ?? '')).join('\n');
+}
+
+test('Weixin enhancement injects the platform send time, and falls back to the message-id clock', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:owner-user', 'session-sent-at');
+  const prompts = [];
+  // A plain text turn reaches `ask` as a string; a structured one as parts.
+  const textOf = (content) => (typeof content === 'string'
+    ? content
+    : content.map((part) => part.text ?? '').join('\n'));
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'sent-at-answer' }) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    contextEnhancement: {
+      botId: 'wx_sent_at',
+      getSettings: () => ({
+        group: { enabled: false, fields: ['senderId'], guidance: '' },
+        direct: { enabled: true, fields: ['sentAt'], guidance: '' },
+      }),
+    },
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, content) => { prompts.push(content); return '已处理'; },
+    },
+    state: fixture.state,
+  });
+
+  // The platform's own field wins when the channel delivers one.
+  await bridge.accept(message(SENT_AT_MESSAGE_ID, '现在几点了？', {
+    create_time_ms: Date.parse('2026-09-28T14:03:07+08:00'),
+  }));
+  assert.equal(prompts.length, 1);
+  const first = textOf(prompts[0]);
+  const platformStamp = localStamp(Date.parse('2026-09-28T14:03:07+08:00'));
+  assert.equal(first.includes(`<dsh_im_source>{"sentAt":"${platformStamp}"}</dsh_im_source>`), true,
+    `platform send time was not injected: ${first}`);
+
+  // Without the platform field the iLink message id still yields the moment.
+  await bridge.accept(message(SENT_AT_LATER_MESSAGE_ID, '再问一次'));
+  assert.equal(prompts.length, 2);
+  const second = textOf(prompts[1]);
+  const idStamp = localStamp(Date.parse('2026-09-28T16:30:45+08:00'));
+  assert.equal(second.includes(`<dsh_im_source>{"sentAt":"${idStamp}"}</dsh_im_source>`), true,
+    `message-id clock was not used: ${second}`);
+  assert.equal(second.includes('senderId'), false, 'only the selected field may be sent');
+});
+
+test('Weixin enhancement stays off, and reads nothing, when the scope is disabled', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:owner-user', 'session-sent-at-off');
+  let sourceReads = 0;
+  const prompts = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'sent-at-off-answer' }) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    contextEnhancement: {
+      botId: 'wx_sent_at_off',
+      getSettings: () => ({
+        group: { enabled: false, fields: [], guidance: '' },
+        direct: { enabled: false, fields: ['sentAt'], guidance: '' },
+      }),
+    },
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, content) => { prompts.push(content); return '已处理'; },
+    },
+    state: fixture.state,
+  });
+
+  const inbound = message(SENT_AT_MESSAGE_ID, '你好');
+  Object.defineProperty(inbound, 'create_time_ms', {
+    configurable: true,
+    get() { sourceReads += 1; return Date.now(); },
+  });
+  await bridge.accept(inbound);
+  assert.equal(prompts.length, 1);
+  assert.equal(sourceReads, 0, 'a disabled scope must not read inbound fields');
+  const content = typeof prompts[0] === 'string'
+    ? prompts[0]
+    : prompts[0].map((part) => String(part.text ?? '')).join('\n');
+  assert.equal(content.includes('dsh_im_source'), false, content);
+});
+
+/**
+ * One bridge whose inbound messages count every read of their send time. The
+ * count is compared against a bridge with no enhancement at all, so the test
+ * pins only what the enhancement itself reads.
+ */
+async function sentAtReads(contextEnhancement, texts) {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:owner-user', 'session-sent-at-reads');
+  const prompts = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'sent-at-reads-answer' }) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    ...(contextEnhancement ? { contextEnhancement } : {}),
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, content) => { prompts.push(content); return '已处理'; },
+    },
+    state: fixture.state,
+  });
+  let reads = 0;
+  for (const [index, text] of texts.entries()) {
+    const inbound = message(`sent-at-reads-${index}`, text);
+    Object.defineProperty(inbound, 'create_time_ms', {
+      configurable: true,
+      get() { reads += 1; return Date.parse('2026-09-28T14:03:07+08:00'); },
+    });
+    await bridge.accept(inbound);
+  }
+  return { reads, prompts };
+}
+
+function sentAtProvider(direct) {
+  return {
+    botId: 'wx_sent_at_reads',
+    getSettings: () => ({ group: { enabled: false, fields: [], guidance: '' }, direct }),
+  };
+}
+
+test('Weixin reads the send time only when a rendered block selects sentAt', async () => {
+  const ordinary = ['你好'];
+  const commands = ['/help', '/new', '/steer 补充一句'];
+  const baseline = await sentAtReads(undefined, ordinary);
+  const commandBaseline = await sentAtReads(undefined, commands);
+
+  // Positive control: a selected field is read, exactly once per message.
+  const selected = await sentAtReads(sentAtProvider({ enabled: true, fields: ['sentAt'], guidance: '' }), ordinary);
+  assert.equal(selected.reads, baseline.reads + 1);
+  assert.match(promptText(selected.prompts[0]), /"sentAt":/);
+
+  // Another field selected: the clock stays untouched.
+  const other = await sentAtReads(sentAtProvider({ enabled: true, fields: ['senderId'], guidance: '' }), ordinary);
+  assert.equal(other.reads, baseline.reads, 'an unselected sentAt must not be read');
+  assert.doesNotMatch(promptText(other.prompts[0]), /sentAt/);
+
+  // Scope switched off.
+  const off = await sentAtReads(sentAtProvider({ enabled: false, fields: ['sentAt'], guidance: '' }), ordinary);
+  assert.equal(off.reads, baseline.reads, 'a disabled scope must not read the send time');
+
+  // Local commands never render a source block, with or without a provider.
+  const enabledCommands = await sentAtReads(
+    sentAtProvider({ enabled: true, fields: ['sentAt'], guidance: '' }), commands);
+  assert.equal(enabledCommands.reads, commandBaseline.reads, 'local commands must not read the send time');
+  const unconfiguredCommands = await sentAtReads(undefined, commands);
+  assert.equal(unconfiguredCommands.reads, commandBaseline.reads);
+});
+
+test('Weixin keeps delivering a message whose send time cannot be read', async () => {
+  const fixture = stateFixture();
+  fixture.sessions.set('p2p:owner-user', 'session-sent-at-throws');
+  const prompts = [];
+  const bridge = new WeixinHarnessBridge({
+    api: { sendText: async () => ({ messageId: 'sent-at-throws-answer' }) },
+    baseUrl: 'https://ilinkai.weixin.qq.com/',
+    token: 'host-token',
+    ownerUserId: 'owner-user',
+    contextEnhancement: sentAtProvider({ enabled: true, fields: ['senderId', 'sentAt'], guidance: '' }),
+    harness: {
+      sessionExists: async () => true,
+      ask: async (_sessionId, content) => { prompts.push(content); return '已处理'; },
+    },
+    state: fixture.state,
+  });
+  const inbound = message(SENT_AT_MESSAGE_ID, '时间读不到也要送达');
+  Object.defineProperty(inbound, 'create_time_ms', {
+    configurable: true,
+    get() { throw new Error('send time is unavailable'); },
+  });
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    await bridge.accept(inbound);
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(prompts.length, 1, 'the message itself must still be delivered');
+  const text = promptText(prompts[0]);
+  assert.match(text, /<dsh_im_source>\{"senderId":"owner-user"\}<\/dsh_im_source>/,
+    `only the unreadable field is dropped: ${text}`);
+  assert.ok(text.endsWith('时间读不到也要送达'));
+});

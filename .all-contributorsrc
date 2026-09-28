@@ -563,6 +563,22 @@
       ]
     },
     {
+      "login": "Pegasus02",
+      "name": "Tianjun Cai",
+      "avatar_url": "https://avatars.githubusercontent.com/u/102945996",
+      "profile": "https://github.com/Pegasus02",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/279"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/279"
+        }
+      ]
+    },
+    {
       "login": "penggaolai",
       "name": "penggaolai",
       "avatar_url": "https://avatars.githubusercontent.com/u/44097312",
