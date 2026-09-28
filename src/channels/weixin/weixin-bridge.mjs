@@ -40,6 +40,7 @@ import {
   captureContextEnhancement,
   captureContextEnhancementSource,
   enhanceContextContent,
+  withSentAt,
 } from '../shared/context-enhancement.mjs';
 import {
   hasInboundImages,
@@ -398,9 +399,20 @@ export class WeixinHarnessBridge {
       this.#acceptedMessageIds.set(messageId, null);
       return this.#finishAccessDecision(messageId, sender, message, access);
     }
-    this.#acceptedMessageIds.set(messageId, captureContextEnhancement(
+    // Capture through the *source* entry point, not the bare config snapshot:
+    // the enhancement that renders the user message is read back from this map
+    // at prompt time, and a rendered `sentAt` selection needs the moment this
+    // capture recorded. A factory that reports a moment would also be read here,
+    // so the source stays lazy -- build it without touching the message.
+    this.#acceptedMessageIds.set(messageId, captureContextEnhancementSource(
       this.#contextEnhancement,
       'direct',
+      withSentAt(
+        () => ({ channel: 'weixin', senderId: sender, chatId: sender }),
+        // A thunk: the platform send time (falling back to the iLink message-id
+        // clock) is only decoded when a `sentAt` selection actually renders.
+        () => message?.create_time_ms ?? weixinMessageTimestampMs(messageId),
+      ),
     ));
     if (sender === this.#ownerUserId) {
       rememberConnectionTestTarget(this.#state, { toUserId: sender });
@@ -717,7 +729,13 @@ export class WeixinHarnessBridge {
       enhancement: captureContextEnhancementSource(
         this.#contextEnhancement,
         'direct',
-        () => ({ channel: 'weixin', senderId: sender, chatId: sender }),
+        // The moment rides on the factory so a local command that never renders
+        // a source block still reads nothing from the inbound message.
+        withSentAt(
+          () => ({ channel: 'weixin', senderId: sender, chatId: sender }),
+          // Platform send time, falling back to the iLink message-id clock.
+          message?.create_time_ms ?? weixinMessageTimestampMs(messageId),
+        ),
       ),
     });
     if (result?.stopped) {
@@ -817,15 +835,14 @@ export class WeixinHarnessBridge {
         let content = hasImages || hasReply
           ? await promptContentForInboundMessage(promptMessage, { signal: this.#signal, deferImages: true })
           : undefined;
-        const snapshot = this.#acceptedMessageIds.get(messageId);
+        const captured = this.#acceptedMessageIds.get(messageId);
         let contextEnhanced = false;
-        if (snapshot) {
+        if (captured) {
           const originalContent = content ?? text;
-          content = enhanceContextContent(originalContent, snapshot, () => ({
-            channel: 'weixin',
-            senderId: sender,
-            chatId: sender,
-          }));
+          // The capture already carries the moment its own source published, so
+          // `enhanceContextContent` accepts it as-is: passing only `.snapshot`
+          // here would drop `sentAt` and silently render no block at all.
+          content = enhanceContextContent(originalContent, captured);
           contextEnhanced = content !== originalContent;
         }
         await this.#state.markSeen(messageId);
@@ -838,7 +855,7 @@ export class WeixinHarnessBridge {
           text,
           content,
           titleText: batchSubmission?.title,
-          sourceGuidance: snapshot?.config?.guidance,
+          sourceGuidance: captured?.snapshot?.config?.guidance,
           contextEnhanced,
           createOptions: { signal: this.#signal },
           existsOptions: { signal: this.#signal },

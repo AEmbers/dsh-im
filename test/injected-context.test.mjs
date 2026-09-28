@@ -5,6 +5,7 @@ import {
   INJECTED_CONTEXT_SEPARATOR,
   INJECTED_CONTEXT_TAGS,
   captureContextEnhancement,
+  withSentAt,
   enhanceContextContent,
 } from '../src/channels/shared/context-enhancement.mjs';
 import {
@@ -36,9 +37,15 @@ function snapshot({ fields = ['channel'], guidance = '' } = {}) {
   }, 'group');
 }
 
-/** The exact text a channel sends for one ordinary message. */
+/**
+ * The text a channel sends for one ordinary message, captured the way a channel
+ * captures it: the moment rides on the source factory through `withSentAt`, and
+ * the factory itself publishes the message's other fields. A fixture that wants
+ * a fixed moment puts it in `source.sentAt`.
+ */
 function enhancedText(text, options, source) {
-  return enhanceContextContent(text, snapshot(options), () => source);
+  const factory = withSentAt(() => source, source?.sentAt);
+  return enhanceContextContent(text, snapshot(options), factory);
 }
 
 /** One claimed plain-text prompt, carrying the prefix as a channel writes it. */
@@ -528,6 +535,8 @@ test('every source-field selection round-trips, including the fields with no rea
   const values = {
     channel: 'feishu', conversationType: 'group', senderId: 'u-1', senderName: '张三',
     conversationTitle: '项目群', chatId: 'chat-1', threadId: 'thread-1', botId: 'bot_one',
+    // A channel hands over the raw instant; the block renders it.
+    sentAt: Date.parse('2026-09-28T14:03:07+08:00'),
   };
   const fieldsOf = (mask) => SOURCE_BLOCK_FIELDS.filter((_field, index) => mask & (1 << index));
   const formsOf = (result) => result.map((entry) => (
@@ -548,12 +557,16 @@ test('every source-field selection round-trips, including the fields with no rea
     for (const field of fields) {
       assert.equal(row.includes(`${field}`), true, `${fields.join('+')} keeps ${field}`);
     }
+    // The moment is rendered, not the raw instant that was handed over.
+    if (fields.includes('sentAt')) {
+      assert.equal(row.includes('2026-09-28 14:03:07'), true, 'sentAt is rendered for the model');
+    }
     // A row always names itself, even when no selected field is readable.
     assert.equal(typeof rewritten[1].source.summary, 'string', fields.join('+'));
     assert.notEqual(rewritten[1].source.summary.length, 0, fields.join('+'));
     subsets += 1;
   }
-  assert.equal(subsets, 255);
+  assert.equal(subsets, (1 << SOURCE_BLOCK_FIELDS.length) - 1);
 });
 
 test('a nameless source row uses the Host label and foreign JSON is not claimed', () => {
