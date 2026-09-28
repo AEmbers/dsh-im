@@ -520,7 +520,8 @@ test('access settings preserve independent mode drafts and save direct and group
     await flush();
   });
 
-  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 4);
+  // 投递设置 / 访问设置 / 群聊 / 指令面板 / 语音交互（语音来自 main，指令面板来自本分支）
+  assert.equal(renderer.root.findAllByProps({ role: 'tab' }).length, 5);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessScene' }).length, 2);
   assert.equal(renderer.root.findAllByProps({ className: 'dim-accessOwnerNotice' }).length, 0);
   assert.equal(accessHelpButtons(renderer.root).length, 2);
