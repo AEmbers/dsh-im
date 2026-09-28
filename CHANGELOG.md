@@ -6,10 +6,26 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.31.0] - 2026-09-29
+
+### Added / 新增
+
+- 上下文增强新增可选来源字段「发送时间」`sentAt`，目前由微信渠道提供：优先使用平台发送时间，平台未提供时从消息 ID 解析，按 Host 本机时区输出 `YYYY-MM-DD HH:mm:ss`。无法取得有效时间时省略该字段，不用当前时间代替。感谢 [@Pegasus02](https://github.com/Pegasus02)（[#279](https://github.com/xmanrui/dsh-im/pull/279)）。
+  Context enhancement adds an optional Sent at source field, `sentAt`, currently supplied by WeChat. It uses the platform send time, or decodes the message ID when that time is absent, and renders `YYYY-MM-DD HH:mm:ss` in the Host's local time zone. An unavailable or invalid time is omitted rather than replaced with the current time. Thanks to [@Pegasus02](https://github.com/Pegasus02) ([#279](https://github.com/xmanrui/dsh-im/pull/279)).
+
 ### Fixed / 修复
 
 - 飞书等待用户回答时，提问发起人发送图片或图文消息会结束本轮追问，并在原会话按顺序处理图片，避免图片被丢弃且流程持续等待文字；原提问卡同步移除按钮。连续发图、图片消息去重和普通文字回答沿用既有机制。（[#208](https://github.com/xmanrui/dsh-im/issues/208)）
   When a Feishu question is pending, images and image posts from its initiating user end the question turn and are processed in order in the same Session. Images are no longer discarded while the flow waits for text, and the question card removes its buttons. Existing queueing, deduplication, and text-answer behavior are preserved. ([#208](https://github.com/xmanrui/dsh-im/issues/208))
+- 发送时间仅在已启用的上下文增强实际选中并输出该字段时读取；关闭增强、未选择字段或执行本地命令时不读取，时间读取失败不阻断消息处理。
+  Send time is read only when an enabled context-enhancement block actually selects and renders the field. Disabled enhancement, unselected fields, and local commands do not read it; an unreadable time does not block message processing.
+
+### Notes / 使用说明
+
+- 不自动开启上下文增强，也不自动给已有配置添加 `sentAt`。启用并勾选后，发送时间会作为消息上下文提供给模型；时间文本不带时区偏移，可在增强提示词中注明 Host 时区。其他渠道暂不提供该字段。
+  Context enhancement is not enabled automatically, and existing field selections do not gain `sentAt` automatically. When enabled and selected, send time is supplied to the model as message context. The text contains no time-zone offset; name the Host time zone in the guidance if needed. Other channels do not currently supply this field.
+- 飞书图片接续只由当前提问的发起人触发；若停止提问失败，图片保留在队列中并提示先回答问题或发送 `/stop`，不会伪造文字答案。依赖声明与 DSH 0.1.7-alpha.1 兼容性声明保持不变；升级后重启 Host 并刷新设置页。
+  Only the initiating user's image interrupts a pending Feishu question. If stopping fails, the image remains queued and the bot asks the user to answer or send `/stop`; no text answer is fabricated. Dependency declarations and the DSH 0.1.7-alpha.1 compatibility declaration remain unchanged. Restart the Host and refresh settings after upgrading.
 
 ## [4.30.0] - 2026-09-28
 
@@ -1374,7 +1390,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.30.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.31.0...HEAD
+[4.31.0]: https://github.com/xmanrui/dsh-im/compare/v4.30.0...v4.31.0
 [4.30.0]: https://github.com/xmanrui/dsh-im/compare/v4.29.1...v4.30.0
 [4.29.1]: https://github.com/xmanrui/dsh-im/compare/v4.29.0...v4.29.1
 [4.29.0]: https://github.com/xmanrui/dsh-im/compare/v4.28.1...v4.29.0
