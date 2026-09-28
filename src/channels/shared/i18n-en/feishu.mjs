@@ -1,5 +1,10 @@
 // English translations (feishu area). Keys are exact Chinese literals passed to t().
 export default {
+  '已结束本轮提问，将在当前会话中继续处理图片。':
+    'The questions have been closed. Your image will be processed in this conversation.',
+  '图片已排队，但暂时无法结束当前提问。请先回答问题或发送 /stop，结束后会继续处理图片。':
+    'Your image is queued, but the current questions could not be closed. Answer them or send /stop; your image will be processed afterward.',
+  '⏹ 提问已结束{progress}': '⏹ Questions closed{progress}',
   '内容已合并至后续消息。': 'Content has been consolidated into the following messages.',
   // feishu/bridge.mjs — welcome / help
   '北汇星河 AIOS 已连接 DeepSeek Harness。':

@@ -218,7 +218,7 @@ Shells can embed the complete IM management panel through the optional `dshImCli
 | `/sessionlist --limit N`, `/sessions --limit N` | List the first N sessions in the current workspace's existing order; N must be a positive integer. |
 | `/session <Session ID>` | Bind the current chat to an existing Harness session. |
 | `/history [count]` | Preview recent messages from the bound Session in a direct chat; defaults to 3, capped at 5. |
-| Interactive question | Reply with an option number, option label, or custom text; separate multiple choices with commas. |
+| Interactive question | Reply with an option number, option label, or custom text; separate multiple choices with commas. In Feishu, an image or image post from the person answering ends the pending question turn and is processed in the same Session, without finishing the remaining questions or resending the image. |
 | Remote approval | Reply with `批准` / `拒绝` / `同意` / `不同意` / `yes` / `no`. |
 
 ### Command details

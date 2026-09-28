@@ -1211,15 +1211,21 @@ export function splitStepStreamCardBlocks(
  * rendered as its own button; the selected option label is submitted via a
  * card callback. Multi-select questions fall back to the plain-text flow (the
  * caller decides), because a multi-select needs a confirm step.
+ * A resolvedText replaces the buttons when an image ends the question flow.
  * Action: answer:<interactionId>:<optionLabel>
  */
-export function questionCard({ interactionId, header, question, detail, options, index, total }) {
+export function questionCard({ interactionId, header, question, detail, options, index, total, resolvedText }) {
   const elements = [];
   const progress = total > 1 ? `（${index + 1}/${total}）` : '';
   if (header) elements.push({ tag: 'div', text: markdown(String(header)) });
   const qText = typeof question === 'string' && question.trim() ? question : t('请输入你的回答。');
   elements.push({ tag: 'div', text: markdown(String(qText)) });
   if (detail) elements.push({ tag: 'div', text: markdown(String(detail)) });
+
+  if (resolvedText) {
+    elements.push({ tag: 'hr' }, { tag: 'div', text: markdown(resolvedText) });
+    return cardWith(t('⏹ 提问已结束{progress}', { progress }), elements);
+  }
 
   if (Array.isArray(options) && options.length > 0) {
     elements.push({ tag: 'hr' });

@@ -2971,7 +2971,7 @@ test('a queued next prompt stays separate while a failed interaction response is
   assert.deepEqual(sent.slice(-2).map(({ text }) => text), ['第一轮完成', '第二轮完成']);
 });
 
-test('a rich-post pending reply does not block the valid text answer behind it', async () => {
+test('a text-only rich-post pending reply does not block the valid text answer behind it', async () => {
   const fixture = stateFixture([['p2p:ou_user', 'session-invalid-reply']]);
   const sent = [];
   const invalidNoticeStarted = deferred();
@@ -3022,7 +3022,6 @@ test('a rich-post pending reply does not block the valid text answer behind it',
     content: JSON.stringify({
       content: [
         [{ tag: 'text', text: '这不是文字回答' }],
-        [{ tag: 'img', image_key: 'img-test' }],
       ],
     }),
   }));
@@ -3037,6 +3036,207 @@ test('a rich-post pending reply does not block the valid text answer behind it',
     custom: '真正的答案',
   }]);
   assert.equal(sent.at(-1).text, '有效答案已收到');
+});
+
+async function imageQuestionFixture({ interactionCards = true, stop, patch, respond, group = false } = {}) {
+  const key = group ? 'group:oc_chat' : 'p2p:ou_user';
+  const fixture = stateFixture([[key, 'session-image-question']]);
+  const sent = [], patches = [], asked = [], responses = [], downloads = [], stops = [];
+  const ready = deferred(), finished = deferred();
+  const input = (id, text, overrides = {}) => event(id, text, {
+    ...(group ? { chat_type: 'group' } : {}), ...overrides,
+  });
+  const client = cardClient(async message => sent.push(message), async request => {
+    patches.push(request);
+    return patch?.(request);
+  });
+  client.im.v1.messageResource = { get: async request => {
+    downloads.push(request.path.file_key);
+    return {
+      headers: { 'content-length': String(PNG_1X1.length) },
+      getReadableStream: () => Readable.from([PNG_1X1]),
+    };
+  } };
+  const harness = {
+    workspaceSession: sessionId => ({
+      sessionExists: async () => true,
+      stopActiveTurn: async control => {
+        stops.push({ sessionId, control });
+        await stop?.();
+        finished.resolve('stopped');
+        return true;
+      },
+      ask: async (content, options) => {
+        asked.push({ sessionId, content: await loadDeferredImages(content, options) });
+        if (asked.length > 1) return '图片已收到';
+        await options.onInteraction({
+          kind: 'question', interactionId: 'image-question', rpcId: 'image-question', sessionId,
+          payload: { type: 'question/requested', sessionId, questions: [
+            { id: 'q1', question: '图片编号？', options: [{ label: 'A' }, { label: 'B' }] },
+            { id: 'q2', question: '图片形状？', options: [{ label: '圆形' }, { label: '方形' }] },
+          ] },
+          respond: async result => {
+            responses.push(result);
+            await respond?.(result);
+            finished.resolve('answered');
+            return { accepted: true };
+          },
+        });
+        ready.resolve();
+        if (await finished.promise === 'stopped') {
+          throw Object.assign(new Error('stopped'), { code: 'turn-stopped' });
+        }
+        return '文字答案已收到';
+      },
+    }),
+  };
+  const bridge = new FeishuHarnessBridge({
+    client, channel: {}, harness, state: fixture.state, status: bridgeStatus(), interactionCards,
+    allowedSenderOpenIds: new Set(['ou_user', 'ou_other']), groupResponseMode: 'all',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  const turn = bridge.accept(input('image-question-start', '请提问'));
+  await ready.promise;
+  const image = (id, overrides = {}) => input(id, '', {
+    message_type: 'image', content: JSON.stringify({ image_key: id }), ...overrides,
+  });
+  return { ...fixture, bridge, input, image, turn, sent, patches, asked, responses, downloads, stops };
+}
+
+test('images close pending Feishu questions and reach the same session once with or without cards', async t => {
+  for (const interactionCards of [true, false]) await t.test(String(interactionCards), async () => {
+    const f = await imageQuestionFixture({ interactionCards });
+    const incoming = f.image('image-answer');
+    await Promise.all([f.bridge.accept(incoming), f.bridge.accept(incoming), f.turn]);
+    await f.bridge.waitForIdle();
+    assert.equal(f.stops.length, 1);
+    assert.equal(f.stops[0].control.key, 'p2p:ou_user');
+    assert.equal(f.responses.length, 1);
+    assert.equal(f.responses[0].error.code, 'cancelled');
+    assert.deepEqual(f.downloads, ['image-answer']);
+    assert.equal(f.asked.length, 2);
+    assert.equal(f.asked[1].sessionId, 'session-image-question');
+    assert.ok(f.asked[1].content.some(part => part.type === 'image'));
+    assert.ok(f.seen.has('image-answer'));
+    if (interactionCards) {
+      const closed = JSON.parse(f.patches.at(-1).data.content);
+      assert.deepEqual(buttonsFromCard(closed), []);
+      assert.match(JSON.stringify(closed), /提问已结束/);
+      await f.bridge.onCardAction(cardActionEvent('om_card_1', 'answer:image-question:0:A', 'ou_user'));
+      assert.equal(f.responses.length, 1, 'an old card cannot submit an answer after cancellation');
+    }
+    await f.bridge.accept(f.input('next-message', '继续'));
+    assert.equal(f.asked.length, 3);
+  });
+});
+
+test('an image post preserves its text and every image after a text answer advances to question two', async () => {
+  const f = await imageQuestionFixture();
+  const firstAnswer = f.bridge.accept(f.input('answer-one', 'A'));
+  const imageAnswer = f.bridge.accept(f.input('image-post', '', {
+    message_type: 'post', content: JSON.stringify({ content: [
+      [{ tag: 'text', text: '请比较这两张图' }],
+      [{ tag: 'img', image_key: 'post-a' }, { tag: 'img', image_key: 'post-b' }],
+    ] }),
+  }));
+  await Promise.all([firstAnswer, imageAnswer, f.turn]);
+  await f.bridge.waitForIdle();
+  assert.deepEqual(f.downloads, ['post-a', 'post-b']);
+  assert.ok(f.asked[1].content.some(part => part.type === 'text' && part.text.includes('请比较这两张图')));
+  assert.equal(f.asked[1].content.filter(part => part.type === 'image').length, 2);
+  assert.match(f.patches.at(-1).data.content, /提问已结束（2\/2）/);
+  assert.equal(f.responses[0].ok, false, 'do not fabricate the missing second answer');
+});
+
+test('images arriving during cancellation keep FIFO order, including replies to the closed question', async () => {
+  const stopStarted = deferred(), releaseStop = deferred();
+  const f = await imageQuestionFixture({ stop: async () => {
+    stopStarted.resolve(); await releaseStop.promise;
+  } });
+  const a = f.bridge.accept(f.image('first-image', { parent_id: 'om_card_1' }));
+  await stopStarted.promise;
+  const b = f.bridge.accept(f.image('second-image', { parent_id: 'om_card_1' }));
+  const c = f.bridge.accept(f.input('followup', '补充说明'));
+  releaseStop.resolve();
+  await Promise.all([a, b, c, f.turn]);
+  await f.bridge.waitForIdle();
+  const late = f.bridge.accept(f.image('late-image', { parent_id: 'om_card_1' }));
+  await late;
+  assert.deepEqual(f.downloads, ['first-image', 'second-image', 'late-image']);
+  assert.equal(f.stops.length, 1);
+  assert.equal(f.asked.length, 5);
+  assert.equal(f.asked[3].content, '补充说明');
+  await f.bridge.accept(f.input('stale-text', 'A', { parent_id: 'om_card_1' }));
+  assert.equal(f.asked.length, 5, 'stale text answers still stay out of the normal conversation');
+});
+
+test('a failed image-triggered stop keeps the question answerable and delivers the queued image afterward', async () => {
+  const f = await imageQuestionFixture({ stop: async () => { throw new Error('temporarily unavailable'); } });
+  const imageAnswer = f.bridge.accept(f.image('queued-image'));
+  await eventually(() => f.sent.some(m => String(m.content).includes('图片已排队')));
+  assert.equal(f.asked.length, 1);
+  assert.equal(f.responses.length, 0);
+  await f.bridge.accept(f.input('fallback-one', 'A'));
+  await f.bridge.accept(f.input('fallback-two', '圆形'));
+  await Promise.all([imageAnswer, f.turn]);
+  await f.bridge.waitForIdle();
+  assert.deepEqual(f.downloads, ['queued-image']);
+  assert.equal(f.responses[0].ok, true);
+  assert.equal(f.responses[0].value.answer.answers.length, 2);
+});
+
+test('failure to update the closed question card does not lose an image', async () => {
+  const f = await imageQuestionFixture({ patch: async () => { throw new Error('card unavailable'); } });
+  await Promise.all([f.bridge.accept(f.image('patch-failure-image')), f.turn]);
+  await f.bridge.waitForIdle();
+  assert.deepEqual(f.downloads, ['patch-failure-image']);
+  assert.equal(f.responses[0].error.code, 'cancelled');
+});
+
+test('another group member cannot interrupt the question with an image', async () => {
+  const f = await imageQuestionFixture({ group: true });
+  const other = f.bridge.accept(f.image('other-image', { senderOpenId: 'ou_other' }));
+  assert.equal(f.stops.length, 0);
+  await f.bridge.accept(f.input('owner-one', 'A'));
+  await f.bridge.accept(f.input('owner-two', '圆形'));
+  await Promise.all([other, f.turn]);
+  await f.bridge.waitForIdle();
+  assert.equal(f.stops.length, 0);
+  assert.equal(f.responses[0].ok, true);
+  assert.deepEqual(f.downloads, ['other-image']);
+});
+
+test('an image in a different conversation leaves the original question waiting', async () => {
+  const f = await imageQuestionFixture();
+  f.sessions.set('p2p:ou_other', 'session-other');
+  await f.bridge.accept(f.image('other-conversation-image', { senderOpenId: 'ou_other' }));
+  assert.equal(f.stops.length, 0);
+  assert.equal(f.responses.length, 0);
+  assert.equal(f.asked[1].sessionId, 'session-other');
+  await f.bridge.accept(f.input('original-one', 'A'));
+  await f.bridge.accept(f.input('original-two', '圆形'));
+  await f.turn;
+  assert.equal(f.responses[0].ok, true);
+});
+
+test('a failed image stop preserves an in-flight card submission and queues following text', async () => {
+  const submitting = deferred(), release = deferred();
+  const f = await imageQuestionFixture({
+    stop: async () => { throw new Error('stop unavailable'); },
+    respond: async result => { if (result.ok) { submitting.resolve(); await release.promise; } },
+  });
+  await f.bridge.accept(f.input('first-answer', 'A'));
+  const answer = f.bridge.onCardAction(cardActionEvent('om_card_2', 'answer:image-question:1:圆形', 'ou_user'));
+  await submitting.promise;
+  const picture = f.bridge.accept(f.image('during-submit'));
+  await eventually(() => f.sent.some(m => String(m.content).includes('图片已排队')));
+  const followup = f.bridge.accept(f.input('after-failed-stop', '新的补充消息'));
+  release.resolve();
+  await Promise.all([answer, picture, followup, f.turn]);
+  await f.bridge.waitForIdle();
+  assert.equal(f.responses.length, 1);
+  assert.equal(f.asked.length, 3);
+  assert.equal(f.asked[2].content, '新的补充消息');
 });
 
 test('an answer resolved elsewhere is not reinterpreted as a later prompt', async () => {

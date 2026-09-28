@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 飞书等待用户回答时，提问发起人发送图片或图文消息会结束本轮追问，并在原会话按顺序处理图片，避免图片被丢弃且流程持续等待文字；原提问卡同步移除按钮。连续发图、图片消息去重和普通文字回答沿用既有机制。（[#208](https://github.com/xmanrui/dsh-im/issues/208)）
+  When a Feishu question is pending, images and image posts from its initiating user end the question turn and are processed in order in the same Session. Images are no longer discarded while the flow waits for text, and the question card removes its buttons. Existing queueing, deduplication, and text-answer behavior are preserved. ([#208](https://github.com/xmanrui/dsh-im/issues/208))
+
 ## [4.30.0] - 2026-09-28
 
 ### Upgrade notes / 升级注意事项

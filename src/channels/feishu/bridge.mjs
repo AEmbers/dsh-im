@@ -1264,7 +1264,7 @@ export class FeishuHarnessBridge {
       this.#commandTasks.add(current);
       return current;
     }
-    if (this.#isResolvedQuestionReply(event, key)) {
+    if (!hasImages && this.#isResolvedQuestionReply(event, key)) {
       const current = Promise.resolve()
         .then(() => this.#discardResolvedInteractionReply(event, messageId))
         .then(() => this.#finishReaction(messageId, processingReaction, 'DONE'))
@@ -1315,6 +1315,19 @@ export class FeishuHarnessBridge {
       return current;
     }
     if (pending && senderOpenId(event) !== pending.actor) {
+      return this.#enqueueMessage(event, messageId, key, processingReaction);
+    }
+    if (pending && hasImages) {
+      const previous = pending.queue ?? Promise.resolve();
+      const interruption = previous.catch(() => undefined)
+        .then(() => this.#interruptQuestionForImage(event, key, pending))
+        .finally(() => {
+          if (pending.queue === interruption) pending.queue = null;
+          this.#interactionTasks.delete(interruption);
+        });
+      pending.queue = interruption;
+      this.#interactionTasks.add(interruption);
+      // Reserve the image's FIFO position before stopping releases the original turn.
       return this.#enqueueMessage(event, messageId, key, processingReaction);
     }
     if (pending?.submitting || pending?.claimedReplyMessageId) {
@@ -5809,6 +5822,40 @@ export class FeishuHarnessBridge {
     });
   }
 
+  async #interruptQuestionForImage(event, key, pending) {
+    if (this.#signal?.aborted || this.#pendingInteractions.get(key) !== pending) return;
+    const question = pending.questions[pending.index];
+    const questionMessageId = pending.questionCardMessageId;
+    const index = pending.index;
+    const wasSubmitting = pending.submitting;
+    pending.submitting = true;
+    try {
+      await runControlCommand('/stop', this.#harness, this.#state, key, {
+        signal: this.#signal,
+        control: { owner: this, key },
+      });
+    } catch (error) {
+      if (this.#pendingInteractions.get(key) === pending) pending.submitting = wasSubmitting;
+      this.#logger.warn?.('[dsh-feishu] could not stop the question turn for an image:', error.message);
+      await this.#send(event.message.chat_id,
+        t('图片已排队，但暂时无法结束当前提问。请先回答问题或发送 /stop，结束后会继续处理图片。'),
+        { replyTo: event.message.message_id }).catch(() => undefined);
+      return;
+    }
+    await this.#cancelPendingInteraction(key, pending.interactionId);
+    const resolvedText = t('已结束本轮提问，将在当前会话中继续处理图片。');
+    if (questionMessageId) {
+      await this.#patchCardMessage(event.message.chat_id, questionMessageId, questionCard({
+        ...question,
+        interactionId: pending.interactionId,
+        index,
+        total: pending.questions.length,
+        resolvedText,
+      }));
+    }
+    await this.#send(event.message.chat_id, resolvedText, { replyTo: event.message.message_id }).catch(() => undefined);
+  }
+
   async #submitQuestionAnswer(pending, answerText, { chatId, messageId, questionMessageId } = {}) {
     const question = pending.questions[pending.index];
     if (!question) return;
@@ -6146,8 +6193,8 @@ export class FeishuHarnessBridge {
     return this.#takePendingInteraction(key, interactionId) !== null;
   }
 
-  async #cancelPendingInteraction(key) {
-    const pending = this.#takePendingInteraction(key);
+  async #cancelPendingInteraction(key, interactionId) {
+    const pending = this.#takePendingInteraction(key, interactionId);
     if (!pending || pending.kind !== 'question') return;
     this.#rememberResolvedInteraction(key, pending);
     try {
