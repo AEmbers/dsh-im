@@ -815,6 +815,9 @@ test('mention response mode ignores unaddressed groups and only accepts this bot
     allowedSenderOpenIds: new Set(['ou_user']),
     botOpenId: 'ou_bot',
     groupResponseMode: 'mention',
+    // This test is about which messages get a reply at all; topic routing is
+    // covered by the dedicated mention-topic tests below.
+    mentionTopicReply: false,
   });
 
   await bridge.accept(event('group-unaddressed', '普通群消息', {
@@ -862,6 +865,8 @@ for (const groupResponseMode of ['mention', 'all']) {
       allowedSenderOpenIds: new Set(['ou_peer_bot']),
       botOpenId: 'ou_bot',
       groupResponseMode,
+      // Acceptance and deduplication only; topic routing is covered elsewhere.
+      mentionTopicReply: false,
     });
 
     const message = botEvent('bot-mention', '@_bot 帮忙检查', {
@@ -941,6 +946,8 @@ test('bot group mentions still obey the group allowlist and command permissions'
     status: bridgeStatus(),
     accessPolicy,
     botOpenId: 'ou_bot',
+    // Allowlist and command permissions only; topic routing is covered elsewhere.
+    mentionTopicReply: false,
   });
   const group = {
     chat_type: 'group', chat_id: 'oc_bot_group',
@@ -1393,6 +1400,8 @@ test('bridge sends Feishu post text and all embedded images as one structured pr
     state: fixture.state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
+    // Structured prompt assembly only; topic routing is covered elsewhere.
+    mentionTopicReply: false,
   });
   const postEvent = event('om_post_input', '', {
     message_type: 'post',
@@ -2630,6 +2639,8 @@ test('a different allowed group member cannot approve or answer an interaction c
     state: fixture.state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_owner', 'ou_member']),
+    // Actor binding only; topic routing is covered elsewhere.
+    mentionTopicReply: false,
   });
 
   const turn = bridge.accept(event('actor-bound-start', '发起审批', {
@@ -3602,6 +3613,8 @@ test('a group interaction question tells the user to mention the bot again', asy
     // covered by the dedicated card tests below.
     interactionCards: false,
     allowedSenderOpenIds: new Set(['ou_a']),
+    // The mention reminder only; topic routing is covered elsewhere.
+    mentionTopicReply: false,
   });
 
   await bridge.accept(event('group-mention-start', '@机器人 请先提问', {
@@ -7985,7 +7998,7 @@ test('menu stop and steer reply friendly when no session is bound', async () => 
   assert.match(JSON.parse(sent.at(-1).content).text, /没有绑定会话/);
 });
 
-function topicReplyFixture({ groupTopicReply = false } = {}) {
+function topicReplyFixture({ mentionTopicReply } = {}) {
   const topics = new Map();
   const replies = [];
   const creates = [];
@@ -8028,7 +8041,8 @@ function topicReplyFixture({ groupTopicReply = false } = {}) {
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
     botOpenId: 'ou_bot',
-    groupTopicReply,
+    // Omitted entirely in the tests that exercise the shipped default.
+    ...(mentionTopicReply === undefined ? {} : { mentionTopicReply }),
     logger: { info() {}, warn() {}, error() {} },
   });
   return { bridge, topics, replies, creates };
@@ -8046,8 +8060,17 @@ function groupHelpEvent(messageId, { mention = true, threadId } = {}) {
   });
 }
 
-test('groupTopicReply auto-opens a topic for an addressed main-feed question and registers it', async () => {
-  const { bridge, topics, replies, creates } = topicReplyFixture({ groupTopicReply: true });
+/** A direct-chat message that mentions the bot, with no group around it. */
+function directMentionEvent(messageId, text, extra = {}) {
+  return event(messageId, text, {
+    senderOpenId: 'ou_user',
+    mentions: [{ key: '@_bot', id: { open_id: 'ou_bot' } }],
+    ...extra,
+  });
+}
+
+test('a mention in a group opens a topic and registers it (default on)', async () => {
+  const { bridge, topics, replies, creates } = topicReplyFixture();
   await bridge.accept(groupHelpEvent('om-help-root'));
   await bridge.waitForIdle();
 
@@ -8058,8 +8081,19 @@ test('groupTopicReply auto-opens a topic for an addressed main-feed question and
   assert.deepEqual(topics.get('omt-auto-1'), { rootMessageId: 'om-help-root', chatId: 'oc_group' });
 });
 
-test('groupTopicReply keeps replies inside a pre-existing Feishu topic without claiming it', async () => {
-  const { bridge, topics, replies } = topicReplyFixture({ groupTopicReply: true });
+test('a mention in a direct chat opens a topic and threads the answer (default on)', async () => {
+  const { bridge, topics, replies, creates } = topicReplyFixture();
+  await bridge.accept(directMentionEvent('om-help-p2p-root', '/help'));
+  await bridge.waitForIdle();
+
+  assert.equal(creates.length, 0, 'the answer must be a reply, not a plain direct message');
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].data.reply_in_thread, true);
+  assert.deepEqual(topics.get('omt-auto-1'), { rootMessageId: 'om-help-p2p-root', chatId: 'oc_chat' });
+});
+
+test('mentionTopicReply keeps replies inside a pre-existing Feishu topic without claiming it', async () => {
+  const { bridge, topics, replies } = topicReplyFixture();
   await bridge.accept(groupHelpEvent('om-help-topic', { threadId: 'omt_existing' }));
   await bridge.waitForIdle();
 
@@ -8068,8 +8102,8 @@ test('groupTopicReply keeps replies inside a pre-existing Feishu topic without c
   assert.equal(topics.size, 0, 'a topic the bot did not open must not be registered as managed');
 });
 
-test('groupTopicReply leaves unaddressed all-mode chatter in the flat group session', async () => {
-  const { bridge, topics, replies } = topicReplyFixture({ groupTopicReply: true });
+test('mentionTopicReply leaves unaddressed all-mode chatter in the flat group session', async () => {
+  const { bridge, topics, replies } = topicReplyFixture();
   await bridge.accept(groupHelpEvent('om-help-unaddressed', { mention: false }));
   await bridge.waitForIdle();
 
@@ -8078,8 +8112,8 @@ test('groupTopicReply leaves unaddressed all-mode chatter in the flat group sess
   assert.equal(topics.size, 0);
 });
 
-test('groupTopicReply is inert in private chats', async () => {
-  const { bridge, topics, replies } = topicReplyFixture({ groupTopicReply: true });
+test('a direct-chat message without a mention stays in the shared direct session', async () => {
+  const { bridge, topics, replies } = topicReplyFixture();
   await bridge.accept(event('om-help-p2p', '/help', { senderOpenId: 'ou_user' }));
   await bridge.waitForIdle();
 
@@ -8088,8 +8122,18 @@ test('groupTopicReply is inert in private chats', async () => {
   assert.equal(topics.size, 0);
 });
 
-test('groupTopicReply disabled keeps the pre-feature flat reply behavior', async () => {
-  const { bridge, topics, replies } = topicReplyFixture({ groupTopicReply: false });
+test('a direct-chat mention opens no topic once the switch is off', async () => {
+  const { bridge, topics, replies } = topicReplyFixture({ mentionTopicReply: false });
+  await bridge.accept(directMentionEvent('om-help-p2p-flat', '/help'));
+  await bridge.waitForIdle();
+
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0].data.reply_in_thread, undefined);
+  assert.equal(topics.size, 0);
+});
+
+test('mentionTopicReply disabled keeps the pre-feature flat reply behavior', async () => {
+  const { bridge, topics, replies } = topicReplyFixture({ mentionTopicReply: false });
   await bridge.accept(groupHelpEvent('om-help-flat'));
   await bridge.waitForIdle();
 
@@ -8098,7 +8142,7 @@ test('groupTopicReply disabled keeps the pre-feature flat reply behavior', async
   assert.equal(topics.size, 0);
 });
 
-test('groupTopicReply opens no topic for a group question denied by the access policy', async () => {
+test('mentionTopicReply opens no topic for a group question denied by the access policy', async () => {
   const topics = new Map();
   const replies = [];
   const creates = [];
@@ -8139,7 +8183,7 @@ test('groupTopicReply opens no topic for a group question denied by the access p
     accessPolicy: directAccessPolicy({ users: [], privilegedIds: [] }),
     allowedSenderOpenIds: new Set(['ou_user']),
     botOpenId: 'ou_bot',
-    groupTopicReply: true,
+    mentionTopicReply: true,
     logger: { info() {}, warn() {}, error() {} },
   });
 
@@ -8198,7 +8242,7 @@ function topicTurnFixture() {
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
     botOpenId: 'ou_bot',
-    groupTopicReply: true,
+    mentionTopicReply: true,
     logger: { info() {}, warn() {}, error() {} },
   });
   return { bridge, state, topics, sessions, replies, asked };
@@ -8213,6 +8257,52 @@ function groupMentionEvent(messageId, text, extra = {}) {
     ...extra,
   });
 }
+
+/** A direct-chat message that mentions the bot (see directMentionEvent above). */
+function directChatMentionEvent(messageId, text, extra = {}) {
+  return event(messageId, text, {
+    senderOpenId: 'ou_user',
+    mentions: [{ key: '@_bot', id: { open_id: 'ou_bot' } }],
+    ...extra,
+  });
+}
+
+test('a direct-chat mention opens its own session while the main window keeps the shared one', async () => {
+  const { bridge, topics, sessions, replies, asked } = topicTurnFixture();
+
+  // Main window: no mention, so the shared direct-chat session.
+  await bridge.accept(event('om-p2p-plain', '普通提问'));
+  await bridge.waitForIdle();
+  assert.deepEqual([...sessions.keys()], ['p2p:ou_user']);
+  assert.notEqual(replies[0].data.reply_in_thread, true);
+
+  // Mentioned question: a managed topic rooted at that message, and a session
+  // of its own so the topic's context does not mix with the main window's.
+  await bridge.accept(directChatMentionEvent('om-p2p-root', '第一个问题'));
+  await bridge.waitForIdle();
+  assert.equal(sessions.get('p2p:ou_user:managed:om-p2p-root'), 'session-topic');
+  assert.equal(replies[1].data.reply_in_thread, true);
+  assert.deepEqual(topics.get('omt-auto-1'), {
+    rootMessageId: 'om-p2p-root',
+    chatId: 'oc_chat',
+  });
+
+  // The reader keeps typing inside the topic Feishu created: the same managed
+  // key must resolve, so the topic stays one session.
+  await bridge.accept(directChatMentionEvent('om-p2p-follow', '继续说', {
+    thread_id: 'omt-auto-1',
+  }));
+  await bridge.waitForIdle();
+  assert.equal(sessions.size, 2, 'the follow-up must not open a second topic session');
+  assert.equal(asked.at(-1).sessionId, 'session-topic');
+  assert.equal(replies[2].data.reply_in_thread, true);
+
+  // A second mention opens a second topic, still separate from both of those.
+  await bridge.accept(directChatMentionEvent('om-p2p-root-2', '另一个问题'));
+  await bridge.waitForIdle();
+  assert.equal(sessions.get('p2p:ou_user:managed:om-p2p-root-2'), 'session-topic');
+  assert.equal(sessions.size, 3);
+});
 
 test('a follow-up inside the auto-created topic continues the managed dsh session', async () => {
   const { bridge, state, topics, sessions, replies, asked } = topicTurnFixture();
@@ -8239,6 +8329,83 @@ test('a follow-up inside the auto-created topic continues the managed dsh sessio
   assert.equal(asked.length, 2);
   assert.equal(asked[1].sessionId, 'session-topic');
   assert.equal(replies[1].data.reply_in_thread, true);
+});
+
+test('a topic the reply response does not report is read back and registered', async () => {
+  // Feishu opens the topic from the threaded reply but does not always echo its
+  // thread_id back — we have seen a topic come back without one. Without the
+  // read-back the topic would never be recorded and its follow-ups would land
+  // in the chat's own session instead of the topic's.
+  const topics = new Map();
+  const sessions = new Map();
+  const seen = new Set();
+  const replies = [];
+  const lookups = [];
+  const asked = [];
+  const client = {
+    im: { v1: { message: {
+      reply: async (request) => {
+        replies.push(request);
+        return { code: 0, data: { message_id: `om-topic-reply-${replies.length}` } };
+      },
+      create: async () => ({ code: 0, data: { message_id: 'om-create' } }),
+      get: async (request) => {
+        lookups.push(request.path.message_id);
+        return {
+          code: 0,
+          data: { items: [{
+            message_id: request.path.message_id,
+            chat_id: 'oc_chat',
+            thread_id: 'omt-p2p-late',
+          }] },
+        };
+      },
+    } } },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client,
+    channel: {},
+    status: bridgeStatus(),
+    state: {
+      hasSeen: (id) => seen.has(id),
+      markSeen: async (id) => seen.add(id),
+      sessionFor: (key) => sessions.get(key) ?? null,
+      setSession: async (key, sessionId) => sessions.set(key, sessionId),
+      clearSession: async (key) => sessions.delete(key),
+      topicRootFor: (threadId) => topics.get(threadId) ?? null,
+      setTopic: async (threadId, root) => topics.set(threadId, root),
+    },
+    harness: {
+      ensureRunning: async () => true,
+      sessionExists: async () => true,
+      createSession: async () => 'session-p2p-late',
+      ask: async (sessionId, text) => {
+        asked.push({ sessionId, text });
+        return '好的';
+      },
+    },
+    allowedSenderOpenIds: new Set(['ou_user']),
+    botOpenId: 'ou_bot',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await bridge.accept(directChatMentionEvent('om-p2p-late-root', '第一个问题'));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(replies[0].data.reply_in_thread, true);
+  assert.deepEqual(lookups, ['om-p2p-late-root']);
+  assert.deepEqual(topics.get('omt-p2p-late'), {
+    rootMessageId: 'om-p2p-late-root',
+    chatId: 'oc_chat',
+  });
+
+  // The follow-up Feishu put inside that topic reuses the managed session.
+  await bridge.accept(directChatMentionEvent('om-p2p-late-follow', '继续说', {
+    thread_id: 'omt-p2p-late',
+  }));
+  await bridge.waitForIdle();
+  assert.equal(sessions.size, 1, 'the topic must stay one session');
+  assert.equal(asked.at(-1).sessionId, 'session-p2p-late');
 });
 
 function deferredAwareStateFixture(initialSessions = []) {
@@ -8916,7 +9083,7 @@ test('deferred card delivery keeps managed-topic routing (replyInThread + thread
     state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_owner']),
-    groupTopicReply: true,
+    mentionTopicReply: true,
   });
   await bridge.waitForIdle();
   await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_inbound' }));
@@ -8963,7 +9130,7 @@ test('deferred plain-text fallback replies inside the managed topic thread', asy
     state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_owner']),
-    groupTopicReply: true,
+    mentionTopicReply: true,
   });
   await bridge.waitForIdle();
   await state.putDeferred(deferredEntryFixture({ key: 'group:oc_chat:managed:om_root' }));
@@ -9235,7 +9402,7 @@ test('step push live_cot mode keeps a topic turn inside the topic with the proce
     state: fixture.state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
-    groupTopicReply: true,
+    mentionTopicReply: true,
     stepPush: true,
     stepPushMode: 'live_cot',
     stepPushClock,
@@ -10432,7 +10599,7 @@ test('step push: in a thread group the step messages stay inside the topic threa
     state: fixture.state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
-    groupTopicReply: true,
+    mentionTopicReply: true,
     stepPush: true,
     stepPushClock,
   });
@@ -10672,7 +10839,7 @@ test('step push: post failure degrades to a threaded plain-text reply inside the
     state: fixture.state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
-    groupTopicReply: true,
+    mentionTopicReply: true,
     stepPush: true,
     stepPushClock,
   });
@@ -10691,6 +10858,92 @@ test('step push: post failure degrades to a threaded plain-text reply inside the
     assert.equal(reply.messageId, 'om_thread_fb', 'the degraded reply anchors on the inbound message');
   }
   assert.equal(creates.length, 0, 'the main chat must not receive the degraded steps');
+});
+
+test('step push: a direct-chat topic reported without a thread_id is read back before follow-ups', async () => {
+  // 逐步消息（post）以前只认回复响应里的 thread_id，没有走 #registerTopicReply
+  // 的回读兜底。真机上遇到过话题已经建出来、响应却没带 thread_id 的情况：那一步
+  // 不登记，话题内的追问就会从 p2p:<用户>:managed:<根消息> 掉回 p2p:<用户>，
+  // 一次对话被劈成两条会话。
+  const sessions = new Map();
+  const topics = new Map();
+  const seen = new Set();
+  const lookups = [];
+  const asked = [];
+  const replies = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      // 关键：回复响应一律不带 thread_id，只能靠回读根消息取。
+      reply: async (request) => {
+        replies.push({
+          anchor: request.path.message_id,
+          replyInThread: request.data.reply_in_thread === true,
+        });
+        return { code: 0, data: { message_id: `om_r_${request.path.message_id}` } };
+      },
+      create: async () => ({ code: 0, data: { message_id: 'om_c_1' } }),
+      get: async (request) => {
+        lookups.push(request.path.message_id);
+        return {
+          code: 0,
+          data: { items: [{
+            message_id: request.path.message_id,
+            chat_id: 'oc_chat',
+            thread_id: 'omt-step-dm',
+          }] },
+        };
+      },
+    } } } },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (sessionId, text, options) => {
+      asked.push({ sessionId, text });
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '答案正文。';
+    }),
+    state: {
+      hasSeen: (id) => seen.has(id),
+      markSeen: async (id) => seen.add(id),
+      sessionFor: (key) => sessions.get(key) ?? null,
+      setSession: async (key, sessionId) => sessions.set(key, sessionId),
+      clearSession: async (key) => sessions.delete(key),
+      topicRootFor: (threadId) => topics.get(threadId) ?? null,
+      setTopic: async (threadId, root) => topics.set(threadId, root),
+    },
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    botOpenId: 'ou_bot',
+    mentionTopicReply: true,
+    stepPush: true,
+    stepPushClock,
+  });
+
+  // 私聊里 @机器人 提问：飞书开话题，但响应没带 thread_id → 必须回读并登记。
+  await bridge.accept(event('om_step_root', '@_user_1 你好', {
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(lookups, ['om_step_root'], '缺少 thread_id 时必须回读根消息');
+  assert.deepEqual(topics.get('omt-step-dm'), { rootMessageId: 'om_step_root', chatId: 'oc_chat' });
+  assert.deepEqual([...sessions.keys()], ['p2p:ou_user:managed:om_step_root']);
+
+  // 用户在话题里继续追问：必须复用同一条会话，而不是掉回私聊主会话。
+  await bridge.accept(event('om_step_follow', '@_user_1 继续', {
+    thread_id: 'omt-step-dm',
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual([...sessions.keys()], ['p2p:ou_user:managed:om_step_root'],
+    '话题内的追问不得另开一条会话');
+  assert.equal(asked.at(-1).sessionId, 'session-step-push');
+  // 回答也得留在话题里：reply_in_thread 由会话键决定，登记丢了的话回答会漏到
+  // 私聊主窗口（既不是话题内、上下文也换了）。
+  const followUps = replies.filter((entry) => entry.anchor === 'om_step_follow');
+  assert.ok(followUps.length > 0, '追问必须被回答');
+  assert.equal(followUps.every((entry) => entry.replyInThread), true,
+    '话题内追问的回答必须带 reply_in_thread');
 });
 
 test('step push: rate-limit retries read structured codes, not just message text', async () => {
@@ -10893,7 +11146,7 @@ test('step push: manual topics stay threaded even with the group-topic switch of
     state: fixture.state,
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
-    // NOTE: groupTopicReply stays at its default (false) on purpose — a manual
+    // NOTE: mentionTopicReply stays at its default (false) on purpose — a manual
     // topic conversation must still thread its replies.
     stepPush: true,
     stepPushClock,
@@ -11818,6 +12071,10 @@ function topicAnchorFixture({ mode = 'text', ...options } = {}) {
     client, channel, harness, state: fixture.state, status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']), botOpenId: 'ou_bot',
     stepPush: mode === 'steps', logger: { info() {}, warn() {}, error() {} },
+    // These tests count the reply-reference reads, so keep conversations flat;
+    // opening a topic reads the root back too, and topic routing has its own
+    // tests above.
+    mentionTopicReply: false,
     ...options,
   });
   let sequence = 0;
@@ -12010,8 +12267,11 @@ test('a p2p message with no body opens the menu instead of a text-only notice', 
   // An "@bot" with nothing after it arrives with an empty body once the mention
   // is stripped. There is no instruction to parse, and the reader is plainly
   // reaching for the panel — answering with "text only" reads as a refusal.
+  // It is a menu request rather than a question, so it must not open a topic
+  // either: every look at the menu would leave another empty session behind.
   const created = [];
   const replied = [];
+  const topics = new Map();
   const seen = new Set();
   const bridge = new FeishuHarnessBridge({
     client: {
@@ -12029,6 +12289,7 @@ test('a p2p message with no body opens the menu instead of a text-only notice', 
           replied.push({
             to: request.path.message_id,
             type: request.data.msg_type,
+            threaded: request.data.reply_in_thread === true,
             text: request.data.msg_type === 'text'
               ? JSON.parse(request.data.content).text
               : null,
@@ -12047,6 +12308,8 @@ test('a p2p message with no body opens the menu instead of a text-only notice', 
       sessionFor: () => null,
       setSession: async () => {},
       clearSession: async () => {},
+      topicRootFor: () => null,
+      setTopic: async (threadId, root) => topics.set(threadId, root),
     },
     status: bridgeStatus(),
     allowedSenderOpenIds: new Set(['ou_user']),
@@ -12067,6 +12330,12 @@ test('a p2p message with no body opens the menu instead of a text-only notice', 
     false,
     'the text-only notice is not sent for a p2p message',
   );
+  assert.equal(
+    replied.some(({ threaded }) => threaded),
+    false,
+    'a menu request must not ask Feishu to open a topic',
+  );
+  assert.equal(topics.size, 0, 'a menu request must not register a managed topic');
 });
 
 test('a bare mention opens the menu only when commands are allowed', async () => {
@@ -12257,6 +12526,8 @@ for (const referenceField of ['parent_id', 'root_id']) {
       accessPolicy: directAccessPolicy({
         users: [{ id: 'ou_user', canExecuteCommands: false }],
       }),
+      // Quoted-mention handling only; topic routing is covered elsewhere.
+      mentionTopicReply: false,
     });
 
     await bridge.accept(event(`om_mention_${referenceField}`, '@_user_1', {

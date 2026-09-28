@@ -113,7 +113,7 @@ export class FeishuRuntime {
   #domain;
   #botOpenId;
   #groupResponseMode;
-  #groupTopicReply;
+  #mentionTopicReply;
   #stepPush;
   #stepPushMode;
   #voice = null;
@@ -148,7 +148,7 @@ export class FeishuRuntime {
     domain = 'feishu',
     botOpenId,
     groupResponseMode,
-    groupTopicReply = false,
+    mentionTopicReply = true,
     stepPush = false,
     stepPushMode = 'post',
     voice = null,
@@ -188,7 +188,7 @@ export class FeishuRuntime {
     this.#domain = domain;
     this.#botOpenId = nonEmptyString(botOpenId);
     this.#groupResponseMode = normalizeFeishuGroupResponseMode(groupResponseMode);
-    this.#groupTopicReply = groupTopicReply === true;
+    this.#mentionTopicReply = mentionTopicReply !== false;
     this.#stepPush = stepPush === true;
     this.#stepPushMode = normalizeFeishuStepPushMode(stepPushMode);
     // voice 为 { config, secret } 来源;凭据缺失时 createVoice 返回禁用对象,
@@ -223,9 +223,9 @@ export class FeishuRuntime {
     this.#bridge?.setGroupResponseMode(this.#groupResponseMode);
   }
 
-  setGroupTopicReply(value) {
-    this.#groupTopicReply = value === true;
-    this.#bridge?.setGroupTopicReply(this.#groupTopicReply);
+  setMentionTopicReply(value) {
+    this.#mentionTopicReply = value !== false;
+    this.#bridge?.setMentionTopicReply(this.#mentionTopicReply);
   }
 
   setStepPush(value) {
@@ -333,7 +333,7 @@ export class FeishuRuntime {
         appId: this.#appId,
         botOpenId: this.#botOpenId,
         groupResponseMode: this.#groupResponseMode,
-        groupTopicReply: this.#groupTopicReply,
+        mentionTopicReply: this.#mentionTopicReply,
         stepPush: this.#stepPush,
         stepPushMode: this.#stepPushMode,
         voice: this.#voice,
