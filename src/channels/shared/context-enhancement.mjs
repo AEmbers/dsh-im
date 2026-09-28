@@ -180,8 +180,9 @@ let warnedMissingSentAt = false;
  * read nothing at all.
  *
  * @param factory - the channel's source factory, or nothing.
- * @param value - platform send time (epoch ms or ISO-8601), a thunk returning
- *   one, or nothing to let the capture fall back to the dispatch clock.
+ * @param value - platform send time (epoch ms or ISO-8601), or a thunk
+ *   returning one. It is evaluated only when a rendered block selects `sentAt`;
+ *   an unusable value, or a thunk that throws, omits the field.
  * @returns the same shape, plus `sentAt` when a usable value was supplied.
  */
 export function withSentAt(factory, value) {
@@ -192,20 +193,30 @@ export function withSentAt(factory, value) {
 }
 
 /**
- * Read the moment a channel published, without invoking its source factory.
+ * Evaluate the moment a channel published, without invoking its source factory.
  *
- * The stored accessor is a thunk, so an unusable published value simply yields
- * nothing here and the capture falls back to its own clock.
+ * Called only while a prompt is rendering a block that selected `sentAt` --
+ * never at capture time -- so an unselected field, a disabled scope, a missing
+ * provider or a local command never reads the inbound message's clock. A
+ * throwing accessor (for example a getter on the inbound event) is contained
+ * here: it costs this one field, not the message.
  *
  * @param source - a source factory carrying `sentAt`, or a plain source object.
- * @returns the captured epoch milliseconds, or undefined when none was given.
+ * @returns `{ published, ms }`: whether a moment was published at all, and its
+ *   epoch milliseconds when it was usable.
  */
-function publishedSentAt(source) {
+function readPublishedSentAt(source) {
   const own = typeof source === 'function' || (source !== null && typeof source === 'object')
     ? source?.[SENT_AT]
     : undefined;
-  const value = typeof own === 'function' ? own() : own;
-  return timestampMs(value) ?? undefined;
+  if (typeof own !== 'function') return { published: false, ms: undefined };
+  let value;
+  try {
+    value = own();
+  } catch {
+    return { published: true, ms: undefined };
+  }
+  return { published: true, ms: timestampMs(value) ?? undefined };
 }
 
 /**
@@ -232,17 +243,12 @@ export function captureContextEnhancementSource(provider, conversationType, sour
   if (typeof provider?.getSettings !== 'function') return null;
   const snapshot = captureContextEnhancement(provider, conversationType);
   if (snapshot === null) return null;
-  // The clock is read where the prompt is dispatched, so a replay cannot drift
-  // to a later moment; the message's own fields stay unread until a prompt
-  // actually renders them.
-  //
-  // `sentAt` stays undefined unless the channel actually published a moment. A
-  // channel that has not wired one must not answer a `sentAt` selection with the
-  // local clock: the model cannot tell the two apart, and a silently substituted
-  // time is worse than an omitted field. Wiring a channel means passing the
-  // moment through `withSentAt`.
-  const sentAt = source?.[SENT_AT] === undefined ? undefined : publishedSentAt(source);
-  return Object.freeze({ snapshot, source, sentAt });
+  // Nothing is read here -- not the message's fields and not the moment a
+  // channel published through `withSentAt`. Local commands capture too (to keep
+  // the privacy rules for a later prompt) but never render, and a capture whose
+  // scope does not select `sentAt` must never touch the clock; the moment is
+  // evaluated only by the render that actually needs it.
+  return Object.freeze({ snapshot, source });
 }
 
 /** Accept a millisecond epoch or an ISO-8601 string; anything else yields null. */
@@ -286,38 +292,30 @@ function sourceString(value, field) {
   return normalized;
 }
 
-function sourceBlock(snapshot, sourceFactory, capturedSentAt) {
+function sourceBlock(snapshot, sourceFactory) {
   const { fields } = snapshot.config;
   const needsSource = fields.some((field) => [
-    'channel', 'senderId', 'senderName', 'conversationTitle', 'chatId', 'threadId', 'sentAt',
+    'channel', 'senderId', 'senderName', 'conversationTitle', 'chatId', 'threadId',
   ].includes(field));
   const source = needsSource ? sourceFactory?.() : null;
   const projected = {};
   for (const field of fields) {
     if (field === 'sentAt') {
-      // Only a channel that actually published a moment through `withSentAt`
-      // renders this field. The raw `sentAt` a factory returns is never read:
-      // the capture already validated it, so re-reading could let "", NaN or a
-      // non-date string through, or let a good capture be overridden by none.
-      // A caller holding only a scope snapshot may still pre-render the string.
-      const published = typeof sourceFactory?.[SENT_AT] !== 'undefined';
-      const rendered = !published && capturedSentAt === undefined ? source?.[field] : undefined;
-      const raw = typeof rendered === 'string'
-        ? rendered
-        : (published ? (publishedSentAt(sourceFactory) ?? capturedSentAt) : capturedSentAt);
-      const formatted = typeof raw === 'string'
-        ? raw
-        : (typeof raw === 'number' ? formatTimestamp(raw) : undefined);
-      if (typeof formatted === 'string' && formatted.trim()) {
-        projected[field] = formatted.replace(CONTROL_CHARACTERS, '').trim().slice(0, SOURCE_LIMITS[field]);
-      } else if (published) {
-        // The channel did publish a moment but it was unusable: that is worth
-        // saying once, because the omitted field is otherwise indistinguishable
-        // from a channel that supplies none.
-        if (!warnedMissingSentAt) {
-          warnedMissingSentAt = true;
-          console.warn('[dsh-im] a published sentAt was unusable and was omitted from the block');
-        }
+      // Only a channel that published a moment through `withSentAt` renders
+      // this field, and the moment is evaluated here, the first and only time
+      // it is needed. A field the factory returns is never read for it: a
+      // channel that did not wire a moment omits the field rather than fall
+      // back to the local clock, which the model could not tell apart.
+      const { published, ms } = readPublishedSentAt(sourceFactory);
+      const formatted = ms === undefined ? undefined : formatTimestamp(ms);
+      if (typeof formatted === 'string' && formatted) {
+        projected[field] = formatted.slice(0, SOURCE_LIMITS[field]);
+      } else if (published && !warnedMissingSentAt) {
+        // The channel did publish a moment but it was unusable or failed to
+        // read: say so once, because the omitted field is otherwise
+        // indistinguishable from a channel that supplies none.
+        warnedMissingSentAt = true;
+        console.warn('[dsh-im] a published sentAt was unusable and was omitted from the block');
       }
       continue;
     }
@@ -355,12 +353,12 @@ function guidanceBlock(guidance) {
  */
 export function enhanceContextContent(content, snapshot, sourceFactory) {
   if (!snapshot) return content;
-  // A capture is `{snapshot, source, sentAt}`; a bare scope is `{config, ...}`.
+  // A capture is `{snapshot, source}`; a bare scope is `{config, ...}`.
   const scope = snapshot.config ? snapshot : snapshot.snapshot;
   if (!scope?.config) return content;
   const factory = sourceFactory ?? (snapshot.config ? undefined : snapshot.source);
   try {
-    const blocks = [sourceBlock(scope, factory, snapshot.sentAt), guidanceBlock(scope.config.guidance)]
+    const blocks = [sourceBlock(scope, factory), guidanceBlock(scope.config.guidance)]
       .filter(Boolean);
     if (blocks.length === 0) return content;
     const prefix = blocks.join(INJECTED_CONTEXT_SEPARATOR);

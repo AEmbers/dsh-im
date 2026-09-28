@@ -423,7 +423,7 @@ const EN = Object.freeze({
   '发送时间': 'Sent at',
   '查看群聊发送时间字段说明': 'View group sent-at field details',
   '查看私聊发送时间字段说明': 'View direct sent-at field details',
-  '当前消息收到的时刻，格式为 YYYY-MM-DD HH:mm:ss（本机时区）。优先使用平台给出的发送时间，平台未提供时改用本机收到消息的时间，两者在 <dsh_im_source> 中不作区分。目前仅微信渠道提供；把本机时区写进增强提示词，模型判断先后顺序时更准确。': 'When the current message was received, as YYYY-MM-DD HH:mm:ss in the local time zone. The platform send time is used when available, otherwise the local receipt time; <dsh_im_source> does not distinguish the two. WeChat is the only channel that provides it today. Naming your time zone in the guidance makes ordering judgements more accurate.',
+  '当前消息的发送时间，格式为 YYYY-MM-DD HH:mm:ss（本机时区）。优先使用平台给出的发送时间；平台未提供时，从微信消息 ID 中解析出发送时间；两者都不可用时，即使已选择该字段，<dsh_im_source> 中也会省略 sentAt。目前仅微信渠道提供；把本机时区写进增强提示词，模型判断先后顺序时更准确。': 'When the current message was sent, as YYYY-MM-DD HH:mm:ss in the local time zone. The platform send time is used when available; otherwise the send time is decoded from the WeChat message ID. If neither is available, <dsh_im_source> omits sentAt even when the field is selected. WeChat is the only channel that provides it today. Naming your time zone in the guidance makes ordering judgements more accurate.',
   '增强提示词': 'Guidance',
   '查看增强提示词使用说明': 'View guidance instructions',
   '查看群聊增强提示词使用说明': 'View group guidance instructions',

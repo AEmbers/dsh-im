@@ -559,7 +559,12 @@ test('every source-field selection round-trips, including the fields with no rea
     }
     // The moment is rendered, not the raw instant that was handed over.
     if (fields.includes('sentAt')) {
-      assert.equal(row.includes('2026-09-28 14:03:07'), true, 'sentAt is rendered for the model');
+      // Rendered in the Host's local zone, so derive the expectation the same way.
+      const at = new Date(values.sentAt);
+      const pad = (value) => String(value).padStart(2, '0');
+      const stamp = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+        + ` ${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+      assert.equal(row.includes(stamp), true, 'sentAt is rendered for the model');
     }
     // A row always names itself, even when no selected field is readable.
     assert.equal(typeof rewritten[1].source.summary, 'string', fields.join('+'));

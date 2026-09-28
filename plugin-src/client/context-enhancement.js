@@ -42,7 +42,7 @@ const FIELD_HELP = Object.freeze({
   }),
   sentAt: Object.freeze({
     labelKey: 'sentAtHelpLabel',
-    text: '当前消息收到的时刻，格式为 YYYY-MM-DD HH:mm:ss（本机时区）。优先使用平台给出的发送时间，平台未提供时改用本机收到消息的时间，两者在 <dsh_im_source> 中不作区分。目前仅微信渠道提供；把本机时区写进增强提示词，模型判断先后顺序时更准确。',
+    text: '当前消息的发送时间，格式为 YYYY-MM-DD HH:mm:ss（本机时区）。优先使用平台给出的发送时间；平台未提供时，从微信消息 ID 中解析出发送时间；两者都不可用时，即使已选择该字段，<dsh_im_source> 中也会省略 sentAt。目前仅微信渠道提供；把本机时区写进增强提示词，模型判断先后顺序时更准确。',
   }),
 });
 

@@ -401,9 +401,9 @@ export class WeixinHarnessBridge {
     }
     // Capture through the *source* entry point, not the bare config snapshot:
     // the enhancement that renders the user message is read back from this map
-    // at prompt time, and a rendered `sentAt` selection needs the moment this
-    // capture recorded. A factory that reports a moment would also be read here,
-    // so the source stays lazy -- build it without touching the message.
+    // at prompt time, and a rendered `sentAt` selection needs the factory that
+    // carries the moment. Nothing is read here; the thunk runs only when that
+    // render selects `sentAt`.
     this.#acceptedMessageIds.set(messageId, captureContextEnhancementSource(
       this.#contextEnhancement,
       'direct',
@@ -729,12 +729,13 @@ export class WeixinHarnessBridge {
       enhancement: captureContextEnhancementSource(
         this.#contextEnhancement,
         'direct',
-        // The moment rides on the factory so a local command that never renders
-        // a source block still reads nothing from the inbound message.
+        // The moment rides on the factory as a thunk, so a local command that
+        // never renders a source block -- and a scope that is off or does not
+        // select `sentAt` -- reads nothing from the inbound message.
         withSentAt(
           () => ({ channel: 'weixin', senderId: sender, chatId: sender }),
           // Platform send time, falling back to the iLink message-id clock.
-          message?.create_time_ms ?? weixinMessageTimestampMs(messageId),
+          () => message?.create_time_ms ?? weixinMessageTimestampMs(messageId),
         ),
       ),
     });
