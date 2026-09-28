@@ -4798,10 +4798,11 @@ export class FeishuHarnessBridge {
       error.feishuCode = response.code;
       throw error;
     }
-    const threadId = nonEmptyString(response?.data?.thread_id);
-    if (threadId) {
-      await this.#registerTopicThreadId(threadId, messageId, chatId);
-    }
+    // 与其他回复路径同一条登记逻辑：响应通常带 thread_id，没带就回读被回复的消息
+    // （#registerTopicReply → #ensureTopicRegistered）。逐步消息以前只认响应，
+    // 于是话题开出来了却没登记，话题内的追问会从托管键掉回聊天自己的会话。
+    // 两个分支都以「该消息仍是待开话题的候选根」为前提，不是候选就是空操作。
+    await this.#registerTopicReply(messageId, chatId, response?.data?.thread_id);
     return response;
   }
 

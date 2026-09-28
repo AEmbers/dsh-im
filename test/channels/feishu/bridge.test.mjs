@@ -10709,6 +10709,92 @@ test('step push: post failure degrades to a threaded plain-text reply inside the
   assert.equal(creates.length, 0, 'the main chat must not receive the degraded steps');
 });
 
+test('step push: a direct-chat topic reported without a thread_id is read back before follow-ups', async () => {
+  // 逐步消息（post）以前只认回复响应里的 thread_id，没有走 #registerTopicReply
+  // 的回读兜底。真机上遇到过话题已经建出来、响应却没带 thread_id 的情况：那一步
+  // 不登记，话题内的追问就会从 p2p:<用户>:managed:<根消息> 掉回 p2p:<用户>，
+  // 一次对话被劈成两条会话。
+  const sessions = new Map();
+  const topics = new Map();
+  const seen = new Set();
+  const lookups = [];
+  const asked = [];
+  const replies = [];
+  const { stepPushClock } = stepPushClockFixture();
+  const bridge = new FeishuHarnessBridge({
+    client: { im: { v1: { message: {
+      // 关键：回复响应一律不带 thread_id，只能靠回读根消息取。
+      reply: async (request) => {
+        replies.push({
+          anchor: request.path.message_id,
+          replyInThread: request.data.reply_in_thread === true,
+        });
+        return { code: 0, data: { message_id: `om_r_${request.path.message_id}` } };
+      },
+      create: async () => ({ code: 0, data: { message_id: 'om_c_1' } }),
+      get: async (request) => {
+        lookups.push(request.path.message_id);
+        return {
+          code: 0,
+          data: { items: [{
+            message_id: request.path.message_id,
+            chat_id: 'oc_chat',
+            thread_id: 'omt-step-dm',
+          }] },
+        };
+      },
+    } } } },
+    channel: stepPushChannel(),
+    harness: stepPushHarness(async (sessionId, text, options) => {
+      asked.push({ sessionId, text });
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+      return '答案正文。';
+    }),
+    state: {
+      hasSeen: (id) => seen.has(id),
+      markSeen: async (id) => seen.add(id),
+      sessionFor: (key) => sessions.get(key) ?? null,
+      setSession: async (key, sessionId) => sessions.set(key, sessionId),
+      clearSession: async (key) => sessions.delete(key),
+      topicRootFor: (threadId) => topics.get(threadId) ?? null,
+      setTopic: async (threadId, root) => topics.set(threadId, root),
+    },
+    status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_user']),
+    botOpenId: 'ou_bot',
+    mentionTopicReply: true,
+    stepPush: true,
+    stepPushClock,
+  });
+
+  // 私聊里 @机器人 提问：飞书开话题，但响应没带 thread_id → 必须回读并登记。
+  await bridge.accept(event('om_step_root', '@_user_1 你好', {
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual(lookups, ['om_step_root'], '缺少 thread_id 时必须回读根消息');
+  assert.deepEqual(topics.get('omt-step-dm'), { rootMessageId: 'om_step_root', chatId: 'oc_chat' });
+  assert.deepEqual([...sessions.keys()], ['p2p:ou_user:managed:om_step_root']);
+
+  // 用户在话题里继续追问：必须复用同一条会话，而不是掉回私聊主会话。
+  await bridge.accept(event('om_step_follow', '@_user_1 继续', {
+    thread_id: 'omt-step-dm',
+    mentions: [{ key: '@_user_1', id: { open_id: 'ou_bot' } }],
+  }));
+  await bridge.waitForIdle();
+
+  assert.deepEqual([...sessions.keys()], ['p2p:ou_user:managed:om_step_root'],
+    '话题内的追问不得另开一条会话');
+  assert.equal(asked.at(-1).sessionId, 'session-step-push');
+  // 回答也得留在话题里：reply_in_thread 由会话键决定，登记丢了的话回答会漏到
+  // 私聊主窗口（既不是话题内、上下文也换了）。
+  const followUps = replies.filter((entry) => entry.anchor === 'om_step_follow');
+  assert.ok(followUps.length > 0, '追问必须被回答');
+  assert.equal(followUps.every((entry) => entry.replyInThread), true,
+    '话题内追问的回答必须带 reply_in_thread');
+});
+
 test('step push: rate-limit retries read structured codes, not just message text', async () => {
   const fixture = stateFixture();
   const sent = [];
