@@ -20,12 +20,17 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 发送时间仅在已启用的上下文增强实际选中并输出该字段时读取；关闭增强、未选择字段或执行本地命令时不读取，时间读取失败不阻断消息处理。
   Send time is read only when an enabled context-enhancement block actually selects and renders the field. Disabled enhancement, unselected fields, and local commands do not read it; an unreadable time does not block message processing.
 
+### Security / 安全
+
+- 将生产依赖 `undici` 从 7.29.0 更新到官方安全修复版 7.29.1，修复本次安装审计报告的 [GHSA-3wwx-pv8p-q78v](https://github.com/advisories/GHSA-3wwx-pv8p-q78v)。这只更新插件依赖，不替代 Node.js 自带网络组件的安全升级。
+  Updated the production dependency `undici` from 7.29.0 to the upstream security release 7.29.1, addressing [GHSA-3wwx-pv8p-q78v](https://github.com/advisories/GHSA-3wwx-pv8p-q78v) reported by the release install audit. This updates the plugin dependency, not Node.js's bundled networking components.
+
 ### Notes / 使用说明
 
 - 不自动开启上下文增强，也不自动给已有配置添加 `sentAt`。启用并勾选后，发送时间会作为消息上下文提供给模型；时间文本不带时区偏移，可在增强提示词中注明 Host 时区。其他渠道暂不提供该字段。
   Context enhancement is not enabled automatically, and existing field selections do not gain `sentAt` automatically. When enabled and selected, send time is supplied to the model as message context. The text contains no time-zone offset; name the Host time zone in the guidance if needed. Other channels do not currently supply this field.
-- 飞书图片接续只由当前提问的发起人触发；若停止提问失败，图片保留在队列中并提示先回答问题或发送 `/stop`，不会伪造文字答案。依赖声明与 DSH 0.1.7-alpha.1 兼容性声明保持不变；升级后重启 Host 并刷新设置页。
-  Only the initiating user's image interrupts a pending Feishu question. If stopping fails, the image remains queued and the bot asks the user to answer or send `/stop`; no text answer is fabricated. Dependency declarations and the DSH 0.1.7-alpha.1 compatibility declaration remain unchanged. Restart the Host and refresh settings after upgrading.
+- 飞书图片接续只由当前提问的发起人触发；若停止提问失败，图片保留在队列中并提示先回答问题或发送 `/stop`，不会伪造文字答案。DSH 0.1.7-alpha.1 兼容性声明保持不变；升级后重启 Host 并刷新设置页。
+  Only the initiating user's image interrupts a pending Feishu question. If stopping fails, the image remains queued and the bot asks the user to answer or send `/stop`; no text answer is fabricated. The DSH 0.1.7-alpha.1 compatibility declaration remains unchanged. Restart the Host and refresh settings after upgrading.
 
 ## [4.30.0] - 2026-09-28
 
