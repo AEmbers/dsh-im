@@ -44,7 +44,7 @@ function commandText(name) {
  * the Host re-syncs the app in the background (creating and removing commands,
  * one per second, because Feishu returns the panel in creation order).
  */
-export function FeishuSlashPanelSettingsPage({ account, rpcCall }) {
+export function FeishuSlashPanelSettingsPage({ account, rpcCall, onSaved }) {
   const incoming = React.useMemo(() => normalizeSlashPanelConfig(account.slashPanel), [account.botId, panelSignature(account.slashPanel)]);
   const [mode, setMode] = React.useState(incoming.mode);
   const [order, setOrder] = React.useState(() => [...incoming.order]);
@@ -106,6 +106,10 @@ export function FeishuSlashPanelSettingsPage({ account, rpcCall }) {
     const stored = normalizeSlashPanelConfig(bot?.slashPanel);
     setMode(stored.mode);
     setOrder([...stored.order]);
+    // Publish the stored panel upwards *before* clearing `dirty`: that re-runs
+    // the snapshot effect above, and a still-stale account would put the list
+    // the reader just replaced back on screen (and into the next copy payload).
+    onSaved?.(stored);
     setDirty(false);
     setSaved(true);
     return snapshot;

@@ -323,6 +323,52 @@ test('syncSlashCommands rebuilds a custom panel newest-first with a pause betwee
   assert.equal(result.changed, true);
 });
 
+test('syncSlashCommands stops a superseded run before it deletes or creates again', async () => {
+  // 运行时在保存新配置时会 abort 上一轮的 signal。被取代的那一轮必须停在下一个
+  // 检查点：否则它会按旧计划继续删/建，把面板留在旧配置上（review 反馈）。
+  const remote = slashPanelRemote({
+    items: [
+      { command: 'new', command_id: 'n1', create_time: '3' },
+      { command: 'stop', command_id: 't1', create_time: '2' },
+      { command: 'menu', command_id: 'm1', create_time: '1' },
+    ],
+  });
+  const controller = new AbortController();
+  let requestsAtAbort = 0;
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+    config: { mode: 'custom', order: ['menu', 'stop', 'new'] },
+    signal: controller.signal,
+    wait: async () => {
+      // 第一轮正按“逆序重建”的节奏创建时，用户保存了新的面板配置。
+      requestsAtAbort = remote.requests.length;
+      controller.abort();
+    },
+  });
+
+  assert.equal(result.superseded, true);
+  assert.deepEqual(remote.created, ['new'], '被取代后不得再创建下一个指令');
+  assert.deepEqual(remote.deleted, ['new', 'stop', 'menu']);
+  assert.equal(remote.requests.length, requestsAtAbort, '被取代后不得再发出任何请求');
+});
+
+test('syncSlashCommands touches nothing when the run is already superseded', async () => {
+  const remote = slashPanelRemote({
+    items: [{ command: 'menu', command_id: 'm1', create_time: '1' }],
+  });
+  const controller = new AbortController();
+  controller.abort();
+  const result = await syncSlashCommands({
+    appId: 'a', appSecret: 's', httpInstance: remote.http, manifest: PANEL_TEST_MANIFEST,
+    config: { mode: 'custom', order: ['new'] },
+    signal: controller.signal,
+  });
+
+  assert.equal(result.superseded, true);
+  assert.deepEqual(remote.deleted, []);
+  assert.deepEqual(remote.created, []);
+});
+
 test('syncSlashCommands leaves a panel that already matches the configuration', async () => {
   const remote = slashPanelRemote({
     items: [

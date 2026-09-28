@@ -1546,6 +1546,132 @@ test('the Feishu command panel page can copy a panel to every other bot', async 
   assert.match(textOf(panelRoot()), /已同步到\s*2\s*个机器人/);
 });
 
+test('the command panel page keeps the saved panel when the account snapshot is stale', async (t) => {
+  // 保存成功后 dirty 归 false 会重跑快照 effect：父层若不把保存结果并入 account，
+  // 页面就会把保存前的列表回填（用户以为没保存成功），随后的“复制到其他机器人”
+  // 还会把这套旧列表写回去。这里刻意让 status 里的快照停留在保存前。
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    setInterval() { return 1; },
+    clearInterval() {},
+    setTimeout() { return 1; },
+    clearTimeout() {},
+    requestAnimationFrame(callback) { callback(); return 1; },
+    cancelAnimationFrame() {},
+  };
+  const source = {
+    botId: 'bot_panel_stale',
+    configured: true,
+    state: 'connected',
+    slashPanel: { mode: 'custom', order: ['help', 'new'] },
+    bot: { name: '固定快照机器人', appIdMasked: 'cli_stale••••test' },
+    health: { status: 'healthy', summary: '长连接运行正常', lastCheckedAt: Date.now() },
+  };
+  const other = {
+    botId: 'bot_panel_other',
+    configured: true,
+    state: 'disconnected',
+    slashPanel: { mode: 'default', order: [] },
+    bot: { name: '另一个机器人', appIdMasked: 'cli_other••••test' },
+    health: { status: 'offline', summary: '等待重连' },
+  };
+  const status = { schemaVersion: 2, revision: 1, state: 'connected', bots: [source, other] };
+  const writes = [];
+  let renderer;
+  await act(async () => {
+    renderer = create(React.createElement(IMSettingsTab, {
+      browserLocation: { href: 'http://localhost:9527/settings' },
+      weixinRpcCall: async () => ({ ok: true, value: { revision: 1, bots: [] } }),
+      feishuRpcCall: async (endpoint, payload) => {
+        if (endpoint === FEISHU_ENDPOINTS.setSlashPanel) {
+          writes.push(payload);
+          // 只有保存响应里的快照是新的：页面不会因为保存而重拉 status，父层那份
+          // account 仍是保存前的。
+          return {
+            ok: true,
+            value: {
+              ...status,
+              bots: status.bots.map((entry) => (
+                entry.botId === payload.botId ? { ...entry, slashPanel: payload.slashPanel } : entry
+              )),
+            },
+          };
+        }
+        return { ok: true, value: status };
+      },
+      deliveryRpcCall: async () => ({ ok: true, value: { targets: [] } }),
+      updateRpcCall: async () => ({ ok: true, value: { runningVersion: '4.0.1', canInstall: false } }),
+    }));
+    await flush();
+  });
+  t.after(async () => {
+    await act(async () => { renderer.unmount(); await flush(); });
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  });
+
+  await act(async () => {
+    renderer.root.findByProps({ id: 'dim-tab-feishu' }).props.onClick();
+    await flush();
+    await flush();
+  });
+  const sourceCard = renderer.root.findByProps({ 'data-bot-id': 'bot_panel_stale' });
+  await act(async () => {
+    sourceCard.findByProps({ 'aria-label': '展开该账号的设置' }).props.onClick({ stopPropagation() {} });
+  });
+  await act(async () => {
+    sourceCard.findByProps({ 'aria-label': '更多机器人设置' }).props.onClick();
+    await flush();
+  });
+  const page = renderer.root.findByProps({ className: 'dim-deliveryPage' });
+  await act(async () => {
+    button(page, '指令面板').props.onClick();
+    await flush();
+  });
+
+  const panelRoot = () => renderer.root.findByProps({ className: 'dim-feishuGroupSettings' });
+  const commandNames = () => panelRoot()
+    .findAllByProps({ className: 'dim-feishuPanelCommand' })
+    .map(textOf);
+  assert.deepEqual(commandNames(), ['/help — 查看帮助', '/new — 开启全新会话']);
+
+  await act(async () => {
+    panelRoot().findByProps({ 'aria-label': '移除 /help' }).props.onClick();
+    await flush();
+  });
+  await act(async () => {
+    button(renderer.root, '保存').props.onClick();
+    await flush();
+    await flush();
+  });
+
+  assert.deepEqual(writes, [{
+    botId: 'bot_panel_stale',
+    slashPanel: { mode: 'custom', order: ['new'] },
+  }]);
+  // 保存后页面停在保存结果上，而不是回到父层的旧快照。
+  assert.deepEqual(commandNames(), ['/new — 开启全新会话'],
+    'the page must show the saved panel, not the stale account snapshot');
+  assert.equal(panelRoot().findByProps({ 'aria-label': '指令面板模式' }).props.value, 'custom');
+
+  // 复制用的是这份已保存的列表，而不是旧快照里的 help/new。
+  await act(async () => {
+    button(renderer.root, '保存并同步到其他机器人').props.onClick();
+    await flush();
+    await flush();
+  });
+  await act(async () => {
+    button(renderer.root, '确认同步').props.onClick();
+    await flush();
+    await flush();
+  });
+
+  assert.deepEqual(writes.slice(1), [
+    { botId: 'bot_panel_stale', slashPanel: { mode: 'custom', order: ['new'] } },
+    { botId: 'bot_panel_other', slashPanel: { mode: 'custom', order: ['new'] } },
+  ], 'the copy must send the saved panel, not the stale one');
+});
+
 test('the Feishu command panel page reports a single-bot channel instead of copying', async (t) => {
   const previousWindow = globalThis.window;
   globalThis.window = {

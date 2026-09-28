@@ -307,6 +307,84 @@ test('FeishuRuntime can disable Slash registration', async () => {
   await runtime.stop();
 });
 
+test('FeishuRuntime stops a superseded panel sync and serialises the next one', async () => {
+  // 上一轮同步还没跑完就再次保存：旧轮必须停在下一个检查点（不再按旧计划创建），
+  // 新轮排在它之后跑，最终面板收敛到最新配置（review 反馈）。
+  const lark = fakeLark();
+  const remote = new Map();          // command -> command_id
+  const created = [];
+  const requestLog = [];
+  let logAtSave = -1;
+  let runtime;
+  lark.defaultHttpInstance.request = async (options) => {
+    const path = options.url.split('/open-apis/')[1] ?? options.url;
+    requestLog.push(`${options.method} ${path}`);
+    if (path === 'auth/v3/tenant_access_token/internal') {
+      return { code: 0, tenant_access_token: 'tenant-token' };
+    }
+    if (options.method === 'GET' && path === 'application/v7/app_slash_commands') {
+      return {
+        code: 0,
+        data: {
+          items: [...remote.entries()].map(([command, command_id], index) => ({
+            command, command_id, create_time: String(index + 1),
+          })),
+        },
+      };
+    }
+    if (options.method === 'POST' && path === 'application/v7/app_slash_commands') {
+      const command = options.data.command;
+      remote.set(command, `id-${command}`);
+      created.push(command);
+      if (created.length === 1) {
+        // 第一轮正在创建第一个指令时，用户保存了空面板。
+        logAtSave = requestLog.length;
+        runtime.setSlashPanel({ mode: 'custom', order: [] });
+      }
+      return { code: 0, data: { command_id: `id-${command}` } };
+    }
+    const match = /^application\/v7\/app_slash_commands\/(.+)$/.exec(path);
+    if (match) {
+      const entry = [...remote.entries()].find(([, id]) => id === match[1]);
+      if (entry) remote.delete(entry[0]);
+      return { code: 0, data: {} };
+    }
+    throw new Error(`unexpected ${options.method} ${options.url}`);
+  };
+  runtime = new FeishuRuntime({
+    lark,
+    appId: 'cli_panel_race',
+    appSecret: 'secret',
+    ownerOpenIds: ['ou_owner'],
+    harness: { async ensureRunning() {} },
+    state: { hasSeen: () => false },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  // 启动前定好面板（此时还没有 http 实例，setSlashPanel 只记录配置）。
+  runtime.setSlashPanel({ mode: 'custom', order: ['help', 'new'] });
+
+  const starting = runtime.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  FakeWSClient.instances[0].becomeReady();
+  await starting;
+  await waitFor(() => runtime.status.slashCommandRegistration === 'done');
+
+  // 逆序重建：先建 new；被取代后不得再建 help。
+  assert.deepEqual(created, ['new'], '被取代的那一轮不得继续按旧计划创建');
+  // 新轮按最新配置（空面板）收敛：删掉刚建的 new。
+  assert.equal(remote.size, 0, '面板必须收敛到最新配置');
+  assert.deepEqual(requestLog.slice(logAtSave), [
+    'POST auth/v3/tenant_access_token/internal',
+    'GET application/v7/app_slash_commands',
+    'DELETE application/v7/app_slash_commands/id-new',
+  ], '新轮必须排在旧轮之后，旧轮不得再发请求');
+  // 状态来自最新一轮，而不是被取代的那一轮。
+  assert.equal(runtime.status.slashCommandsRegistered, 0);
+  assert.equal(runtime.status.slashCommandsRemoved, 1);
+  assert.equal(runtime.status.slashCommandsFailed, 0);
+  await runtime.stop();
+});
+
 test('FeishuRuntime uses a remembered private target for wildcard-only manual bots', async () => {
   const state = { hasSeen: () => false };
   const runtime = new FeishuRuntime({

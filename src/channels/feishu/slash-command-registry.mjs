@@ -331,13 +331,20 @@ function slashPanelDescription(entry, command) {
  *
  * @returns {{ created: Array<{command,command_id}>, deleted: string[],
  *   existing: string[], external: string[], failed: Array<{command,error}>,
- *   changed: boolean }}
+ *   changed: boolean, superseded: boolean }} `superseded` marks a run that
+ *   stopped early because a newer panel config took over; it reports what it
+ *   managed to do, and the newer run converges the panel from there.
  */
 export async function syncSlashCommands({
   appId, appSecret, domain = 'feishu', httpInstance, timeoutMs = 15000,
   signal, manifest = SLASH_COMMAND_MANIFEST, config = null,
   intervalMs = SLASH_PANEL_CREATE_INTERVAL_MS, wait = defaultWait,
 }) {
+  // A superseded run — the runtime aborts this signal when a newer panel config
+  // arrives — must not send further create/delete calls: the newer run re-reads
+  // the panel and converges it, and letting both write would leave the older
+  // plan's commands behind. Requests already in flight are left to finish.
+  const stopped = () => signal?.aborted === true;
   const tenantAccessToken = await fetchTenantAccessToken({
     appId, appSecret, domain, httpInstance, timeoutMs, signal,
   });
@@ -356,6 +363,7 @@ export async function syncSlashCommands({
     const created = [];
     const failed = [];
     for (const entry of resolveSlashPanelManifest(config, manifest)) {
+      if (stopped()) break;
       const command = commandNameOf(entry);
       if (!command || registered.has(command)) continue;
       try {
@@ -368,6 +376,7 @@ export async function syncSlashCommands({
         created.push({ command, command_id: commandId });
         registered.add(command);
       } catch (error) {
+        if (stopped()) break;
         if (error?.code === '40000000' && /already exists/i.test(error?.msg ?? '')) {
           registered.add(command);
           continue;
@@ -386,6 +395,7 @@ export async function syncSlashCommands({
       external,
       failed,
       changed: created.length > 0,
+      superseded: stopped(),
     };
   }
 
@@ -400,12 +410,21 @@ export async function syncSlashCommands({
     };
   }
 
+  // A newer config took over while we were reading the panel: leave the rebuild
+  // to its run rather than deleting commands for a plan nobody wants anymore.
+  if (stopped()) {
+    return {
+      created: [], deleted: [], existing: current, external, failed: [], changed: false, superseded: true,
+    };
+  }
+
   const byName = new Map(
     items.map((item) => [commandNameOf(item), item]).filter(([name]) => name && owned.has(name)),
   );
   const deleted = [];
   const failed = [];
   for (const name of current) {
+    if (stopped()) break;
     const item = byName.get(name);
     if (!item?.command_id) {
       failed.push({ command: name, error: 'the registered command reports no command_id' });
@@ -417,8 +436,15 @@ export async function syncSlashCommands({
       });
       deleted.push(name);
     } catch (error) {
+      if (stopped()) break;
       failed.push({ command: name, error: error?.message ?? String(error) });
     }
+  }
+  // A superseded run stops before rebuilding: the newer run owns the panel now.
+  if (stopped()) {
+    return {
+      created: [], deleted, existing: current, external, failed, changed: deleted.length > 0, superseded: true,
+    };
   }
   // Deleting only part of the panel would leave it half-converged, and
   // recreating a name that still exists is rejected as a duplicate. Stop here;
@@ -429,11 +455,14 @@ export async function syncSlashCommands({
 
   const created = [];
   for (const [index, entry] of [...plannedEntries].reverse().entries()) {
+    if (stopped()) break;
     const command = commandNameOf(entry);
     try {
       if (index > 0) {
         await wait(intervalMs, signal);
-        signal?.throwIfAborted();
+        // The wait wakes on abort as well, so re-check instead of recording a
+        // superseded run as a failed create.
+        if (stopped()) break;
       }
       const commandId = await createSlashCommandWithToken({
         tenantAccessToken, domain, httpInstance, timeoutMs, signal,
@@ -443,6 +472,7 @@ export async function syncSlashCommands({
       });
       created.push({ command, command_id: commandId });
     } catch (error) {
+      if (stopped()) break;
       failed.push({ command, error: error?.message ?? String(error) });
       if (MISSING_PERMISSION_CODES.has(error?.code)
         || /(?:lacks permission|access denied)/i.test(error?.msg ?? '')) {
@@ -451,7 +481,15 @@ export async function syncSlashCommands({
     }
   }
 
-  return { created, deleted, existing: [], external, failed, changed: true };
+  return {
+    created,
+    deleted,
+    existing: [],
+    external,
+    failed,
+    changed: created.length > 0 || deleted.length > 0,
+    superseded: stopped(),
+  };
 }
 
 export default registerSlashCommands;

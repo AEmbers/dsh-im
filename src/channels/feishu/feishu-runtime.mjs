@@ -147,9 +147,13 @@ export class FeishuRuntime {
   #slashHttpInstance = null;
   /**
    * Bumped on every panel change: a sync started for an older config stops at
-   * its next await instead of racing the newer one (last writer wins).
+   * its next checkpoint instead of racing the newer one (last writer wins).
    */
   #slashSyncEpoch = 0;
+  /** Cancels the panel sync in flight; it stops before its next request. */
+  #slashSyncCancel = null;
+  /** Panel syncs run one after another, so two plans never interleave. */
+  #slashSyncQueue = Promise.resolve();
 
   constructor({
     lark,
@@ -266,15 +270,7 @@ export class FeishuRuntime {
   setSlashPanel(value) {
     this.#slashPanel = normalizeSlashPanelConfig(value);
     this.#slashSyncEpoch += 1;
-    const httpInstance = this.#slashHttpInstance;
-    const signal = this.#abortController?.signal;
-    if (!this.#slashCommands || !httpInstance || !signal || signal.aborted) return;
-    void this.#registerSlashCommands(
-      httpInstance,
-      () => !signal.aborted,
-      signal,
-      this.#slashSyncEpoch,
-    );
+    this.#scheduleSlashPanelSync();
   }
 
   async start() {
@@ -480,7 +476,7 @@ export class FeishuRuntime {
       // HTTP instance is kept so a later panel change can re-sync while running.
       if (this.#slashCommands && httpInstance) {
         this.#slashHttpInstance = httpInstance;
-        void this.#registerSlashCommands(httpInstance, isCurrentStart, signal);
+        this.#scheduleSlashPanelSync();
       }
       return this.status;
     } catch (error) {
@@ -723,6 +719,41 @@ export class FeishuRuntime {
     return { sent: true };
   }
 
+  /**
+   * Queue one panel sync for the current config.
+   *
+   * Two saves in a row used to run two syncs concurrently, and the older one
+   * kept deleting and creating commands from a plan nobody wanted anymore. Here
+   * the run in flight is cancelled first — it stops at its next checkpoint while
+   * requests already sent are left to finish — and the new run starts only once
+   * it has settled, so the panel converges to the newest config.
+   */
+  #scheduleSlashPanelSync() {
+    const httpInstance = this.#slashHttpInstance;
+    const connectionSignal = this.#abortController?.signal;
+    if (!this.#slashCommands || !httpInstance || !connectionSignal || connectionSignal.aborted) return;
+    const epoch = this.#slashSyncEpoch;
+    this.#slashSyncCancel?.();
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    const forwardAbort = () => cancel();
+    this.#slashSyncCancel = cancel;
+    connectionSignal.addEventListener('abort', forwardAbort, { once: true });
+    if (connectionSignal.aborted) cancel();
+    const run = this.#slashSyncQueue.then(() => this.#registerSlashCommands(
+      httpInstance,
+      () => !connectionSignal.aborted && this.#abortController?.signal === connectionSignal,
+      controller.signal,
+      epoch,
+    ));
+    const settled = run.then(() => {}, () => {});
+    this.#slashSyncQueue = settled;
+    void settled.then(() => {
+      connectionSignal.removeEventListener('abort', forwardAbort);
+      if (this.#slashSyncCancel === cancel) this.#slashSyncCancel = null;
+    });
+  }
+
   async #registerSlashCommands(httpInstance, isCurrentStart, signal, epoch = this.#slashSyncEpoch) {
     this.#status.slashCommandRegistration = 'registering';
     this.#status.slashCommandsError = null;
@@ -738,7 +769,7 @@ export class FeishuRuntime {
       });
       // A newer panel config took over while this sync was running: its own run
       // reports the outcome, so this one only stops.
-      if (!isCurrentStart() || epoch !== this.#slashSyncEpoch) return;
+      if (!isCurrentStart() || epoch !== this.#slashSyncEpoch || result.superseded === true) return;
       this.#status.slashCommandRegistration = 'done';
       this.#status.slashCommandsRegistered = result.created.length;
       this.#status.slashCommandsExisting = result.existing.length;
