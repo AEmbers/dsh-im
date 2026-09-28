@@ -710,11 +710,15 @@
       "contributions": [
         {
           "type": "code",
-          "url": "https://github.com/xmanrui/dsh-im/pull/222"
+          "url": "https://github.com/xmanrui/dsh-im/commits/main/?author=yangzhe1991"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/commits/main/?author=yangzhe1991"
         },
         {
           "type": "test",
-          "url": "https://github.com/xmanrui/dsh-im/pull/222"
+          "url": "https://github.com/xmanrui/dsh-im/commits/main/?author=yangzhe1991"
         }
       ]
     },

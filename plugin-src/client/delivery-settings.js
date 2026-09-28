@@ -3,6 +3,7 @@ import * as React from 'react';
 import { AccessPolicySettingsPage } from './access-policy-settings.js';
 import { FeishuGroupSettingsPage } from './channels/feishu/group-settings.js';
 import { FeishuVoiceSettingsPage } from './channels/feishu/voice-settings.js';
+import { FeishuSlashPanelSettingsPage } from './channels/feishu/slash-panel-settings.js';
 import { h, isEnglish, localizeText } from './i18n.js';
 
 export const DELIVERY_RPC_CHANNEL = '/dsh-im-delivery';
@@ -30,6 +31,7 @@ export const BOT_SETTINGS_TABS = Object.freeze([
 export const FEISHU_BOT_SETTINGS_TABS = Object.freeze([
   ...BOT_SETTINGS_TABS,
   Object.freeze({ id: 'group', label: '群聊' }),
+  Object.freeze({ id: 'slash', label: '指令面板' }),
   Object.freeze({ id: 'voice', label: '语音交互' }),
 ]);
 
@@ -633,11 +635,19 @@ export function DeliveryTargetSettingsPage({
   const [saving, setSaving] = React.useState(false);
   const [botCopyState, setBotCopyState] = React.useState(null);
   const [accessPolicy, setAccessPolicy] = React.useState(account.accessPolicy);
+  // The slash panel page re-reads its baseline from this snapshot after a save,
+  // so the saved panel has to land here — a stale account would put the
+  // pre-save list back on screen and into the next "copy to other bots" payload.
+  const [slashPanel, setSlashPanel] = React.useState(account.slashPanel);
   const mounted = React.useRef(true);
 
   React.useEffect(() => {
     setAccessPolicy(account.accessPolicy);
   }, [account.botId, account.accessPolicy]);
+
+  React.useEffect(() => {
+    setSlashPanel(account.slashPanel);
+  }, [account.botId, account.slashPanel]);
 
   const invoke = React.useCallback(async (endpoint, payload = {}, signal) => {
     if (typeof rpcCall !== 'function') throw new Error('投递目标设置暂不可用。');
@@ -793,6 +803,12 @@ export function DeliveryTargetSettingsPage({
       ? h(FeishuGroupSettingsPage, {
           account,
           rpcCall: accessRpcCall,
+        })
+    : activeTab.id === 'slash' && channel === 'feishu'
+      ? h(FeishuSlashPanelSettingsPage, {
+          account: { ...account, slashPanel },
+          rpcCall: accessRpcCall,
+          onSaved: setSlashPanel,
         })
     : activeTab.id === 'voice' && channel === 'feishu'
       ? h(FeishuVoiceSettingsPage, {

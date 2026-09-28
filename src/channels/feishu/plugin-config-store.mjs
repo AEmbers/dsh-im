@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { normalizeFeishuGroupResponseMode } from './group-response-mode.mjs';
 import { normalizeFeishuStepPushMode } from './step-push-mode.mjs';
 import { normalizeFeishuVoiceConfig } from './voice-config.mjs';
+import { normalizeSlashPanelConfig } from './slash-command-panel.mjs';
 
 export const LEGACY_FEISHU_SECRET_REF = 'DSH_FEISHU_APP_SECRET';
 
@@ -51,6 +52,7 @@ function normalizeBot(value, { legacy = false } = {}) {
     stepPush: value.stepPush === true,
     stepPushMode: normalizeFeishuStepPushMode(value.stepPushMode),
     voice: normalizeFeishuVoiceConfig(value.voice),
+    slashPanel: normalizeSlashPanelConfig(value.slashPanel),
     groupMessagePermissionGranted: value.groupMessagePermissionGranted === true,
     deletionPending: value.deletionPending === true,
     connectedAt: cleanString(value.connectedAt),
