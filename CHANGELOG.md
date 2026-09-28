@@ -6,6 +6,36 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.30.0] - 2026-09-28
+
+### Upgrade notes / 升级注意事项
+
+- 飞书「被 @ 时以话题方式回复」现在默认开启，群聊和私聊都会在主时间线中被 @ 提问的消息下创建独立话题；这也会改变已有机器人的默认行为。需要保留平铺回复时，请在机器人卡片「更多设置 → 群聊」中关闭该开关（`mentionTopicReply: false`）。
+  Feishu's Reply as a topic when mentioned setting is now on by default in both groups and direct chats, including existing bots. A question mentioning the bot in the main timeline starts a dedicated topic. To retain flat replies, disable the setting under the bot card's More Settings → Group (`mentionTopicReply: false`).
+- 旧字段 `groupTopicReply` 不会迁移为新开关的取值，下次保存时会被忽略。相关设置端点由 `bot.group-topic-reply.set` 更名为 `bot.mention-topic-reply.set`；自行接入该端点的客户端需同步调整。升级后请重启 Host 并刷新设置页。
+  The old `groupTopicReply` value is not migrated to the new setting and is ignored on the next save. The setting endpoint changes from `bot.group-topic-reply.set` to `bot.mention-topic-reply.set`; custom clients using it must update accordingly. Restart the Host and refresh settings after upgrading.
+
+### Added / 新增
+
+- 飞书由机器人开启的话题对应独立的 DSH 会话，话题内后续消息继续使用同一会话；仅发送 @机器人 不创建话题，没有 @ 的普通消息沿用原有会话及回复规则。感谢 [@yangzhe1991](https://github.com/yangzhe1991)（[#275](https://github.com/xmanrui/dsh-im/pull/275)）。
+  Bot-created Feishu topics map to independent DSH Sessions, with follow-up messages staying in the same Session. A bare bot mention does not create a topic, and ordinary messages without a mention retain existing conversation and reply rules. Thanks to [@yangzhe1991](https://github.com/yangzhe1991) ([#275](https://github.com/xmanrui/dsh-im/pull/275)).
+- 飞书机器人「更多设置 → 指令面板」可选择跟随插件默认清单，或自定义输入框“/”面板中的内置指令及顺序；支持增删、上下移动，以及确认后将当前配置保存并复制到同渠道其他机器人。离线机器人在下次启动时同步。感谢 [@yangzhe1991](https://github.com/yangzhe1991)（[#274](https://github.com/xmanrui/dsh-im/pull/274)）。
+  Feishu More Settings → Command Panel now supports following the shipped defaults or selecting and ordering built-in commands in the input box's slash panel. Commands can be added, removed, and moved up or down; after confirmation, the current configuration can be saved and copied to other bots on the channel. Offline bots synchronize on their next start. Thanks to [@yangzhe1991](https://github.com/yangzhe1991) ([#274](https://github.com/xmanrui/dsh-im/pull/274)).
+
+### Fixed / 修复
+
+- 飞书回复未返回 `thread_id` 时回读根消息并登记话题，包含逐步消息模式，避免话题内追问错误回到主会话。
+  Feishu topic registration reads back the root message when a reply omits `thread_id`, including step-by-step message mode, preventing topic follow-ups from falling back to the main conversation.
+- 同一机器人的指令面板同步串行执行，新配置使旧同步在后续检查点停止，避免新旧计划交错写入；保存后设置页和后续复制操作使用已保存的新列表，不再回显旧配置。
+  Command-panel synchronization runs serially per bot. New settings stop superseded work at subsequent checkpoints to prevent interleaved writes. The settings page and later copy actions retain the newly saved list instead of reverting to stale configuration.
+
+### Notes / 使用说明
+
+- 隐藏面板指令不等于禁用该命令，手动输入仍遵循现有处理及权限规则。默认模式仅补齐缺少项，不删除、不重排已有项；自定义模式按需重建插件清单内的指令，不删除清单外的指令。后台同步可能需要数十秒，保存配置成功不代表飞书面板已经更新完成。
+  Hiding a panel entry does not disable the command; typed commands retain existing handling and permission rules. Default mode only adds missing entries without deleting or reordering existing ones. Custom mode rebuilds commands from the plugin manifest when needed and leaves commands outside that manifest untouched. Background synchronization may take tens of seconds; saving settings does not mean the Feishu panel has finished updating.
+- 宿主兼容性声明保持 DSH 0.1.7-alpha.1，依赖声明未变。
+  Host compatibility remains declared for DSH 0.1.7-alpha.1, and dependency declarations are unchanged.
+
 ## [4.29.1] - 2026-09-28
 
 ### Changed / 变更
@@ -1339,7 +1369,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.29.1...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.30.0...HEAD
+[4.30.0]: https://github.com/xmanrui/dsh-im/compare/v4.29.1...v4.30.0
 [4.29.1]: https://github.com/xmanrui/dsh-im/compare/v4.29.0...v4.29.1
 [4.29.0]: https://github.com/xmanrui/dsh-im/compare/v4.28.1...v4.29.0
 [4.28.1]: https://github.com/xmanrui/dsh-im/compare/v4.28.0...v4.28.1
