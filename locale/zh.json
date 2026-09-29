@@ -1,5 +1,5 @@
 {
   "meta": {
-    "description": "把微信、飞书、企微、钉钉、QQ、Telegram、WhatsApp、Slack、Discord、Matrix接入DSH"
+    "description": "把微信、飞书、企微、钉钉、QQ、Telegram、WhatsApp、Slack、Discord、Matrix接入DSH。入口：设置 → IM机器人。"
   }
 }
