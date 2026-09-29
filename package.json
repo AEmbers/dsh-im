@@ -2,7 +2,7 @@
   "name": "@xmanrui/dsh-im",
   "version": "4.31.0",
   "icon": "./assets/logo-plugin-message-link-gradient.webp",
-  "description": "把十二种 IM 渠道和公网 AI Office 接入本机 DeepSeek Harness。 Connect twelve IM channels and a public AI Office to a local DeepSeek Harness.",
+  "description": "把微信、飞书、企微、钉钉、QQ、Telegram、WhatsApp、Slack、Discord、Matrix接入DSH Connect Telegram, WhatsApp, Slack, Discord, Matrix, WeChat, Feishu, WeCom, DingTalk, and QQ to DSH.",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -116,13 +116,15 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "assets",
     "bin",
     "cordis.patch.yml",
     "lib",
+    "locale/*.json",
     "plugin-src",
     "scripts/verify-interface-language.mjs",
     "scripts/verify-injected-context.mjs",
