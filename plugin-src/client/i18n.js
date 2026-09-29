@@ -42,6 +42,8 @@ const EN = Object.freeze({
   '无需安装第三方服务；请按指引授予 macOS Messages 访问权限。': 'No third-party service is required; follow the guide to grant macOS Messages access.',
   'macOS Messages 权限': 'macOS Messages permissions',
   'IM机器人': 'IM bots',
+  '打开 IM机器人': 'Open IM bots',
+  '返回插件详情': 'Back to plugin details',
   'IM机器人设置': 'IM bot settings',
   'IM 面板加载失败': 'Could not load the IM panel',
   '更多机器人设置': 'More bot settings',

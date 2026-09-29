@@ -83,6 +83,7 @@ import { installSessionChannelLogos } from './session-channel-logos.js';
 import { UpdatePanel, UPDATE_RPC_CHANNEL } from './update-panel.js';
 import { WorkspaceDirectoryPickerContext } from './workspace-editor.js';
 import { IMPanelErrorBoundary } from './panel-error-boundary.js';
+import { installImPluginPage } from './plugin-page.js';
 
 export const name = 'im-settings';
 export const inject = ['slots', 'connection', 'locale', 'workspaces'];
@@ -565,6 +566,8 @@ export function apply(ctx) {
   const buildPanelElement = (props = {}) => h(IMPanel, {
     preferredSectionId: props.preferredSectionId,
   });
+
+  installImPluginPage(ctx, { packageName: manifest.name, renderPanel: buildPanelElement });
 
   ctx.effect(() => {
     let disposed = false;

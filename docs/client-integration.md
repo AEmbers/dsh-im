@@ -4,6 +4,10 @@ dsh-im 发布可选客户端服务 `dshImClient`，供同一 DSH 客户端中的
 
 The optional `dshImClient` service exposes the existing IM management panel to a shell in the same DSH client. Settings → IM bots remains available by default. No migration or new configuration is required. The host-side `dshIm` delivery service is separate.
 
+支持插件详情操作按钮的 DSH 中，dsh-im 详情页提供「打开 IM机器人」按钮，在主区域打开同一管理面板；「返回插件详情」返回该插件。此入口依赖可选的 `layout`、`pluginNavigation` 服务及 `plugins.detail.actions` 槽位，旧版 DSH 仍可通过设置入口访问。
+
+On DSH versions with plugin detail actions, **Open IM bots** opens the same management panel in the main area, with **Back to plugin details** returning to this plugin. This entry uses the optional `layout` and `pluginNavigation` services and the `plugins.detail.actions` slot. Older DSH versions retain the Settings entry.
+
 ```ts
 interface DshImClient {
   readonly version: 1;
