@@ -6,6 +6,22 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.32.0] - 2026-09-29
+
+### Added / 新增
+
+- 支持插件详情操作按钮的 DSH 中，dsh-im 插件详情页新增「打开 IM机器人」按钮，可在主区域打开已有 IM 管理面板，并通过「返回插件详情」返回当前插件。按钮及返回入口支持中英文。
+  On DSH versions that support plugin detail actions, the dsh-im details page adds **Open IM bots** to open the existing IM management panel in the main area, with **Back to plugin details** returning to this plugin. Both actions support Chinese and English.
+- 新增中英文插件描述资源，并随 npm 包发布、导出 `locale/*.json`，供 Host 根据界面语言显示插件说明。
+  Added Chinese and English plugin-description resources, published and exported as `locale/*.json` so the Host can display the description in the interface language.
+
+### Notes / 使用说明
+
+- 新入口按需接入可选的 `layout`、`pluginNavigation` 服务和 `plugins.detail.actions` 槽位；缺少相关能力的旧版 DSH 仍可通过「设置 → IM机器人」访问，无需迁移配置。入口注册不会提前加载管理面板，相关服务或槽位撤销时会清理注册。
+  The new entry uses the optional `layout` and `pluginNavigation` services and the `plugins.detail.actions` slot. Older DSH versions without these capabilities retain **Settings → IM bots**, with no configuration migration. Registration does not mount the panel early, and registrations are cleaned up when the relevant services or slots are withdrawn.
+- 本次不改变渠道配置及消息处理行为；DSH 兼容性声明仍为 `0.1.7-alpha.1`，插件详情入口仅在 Host 提供上述能力时可用。
+  This release does not change channel configuration or message processing. The declared DSH compatibility remains `0.1.7-alpha.1`; the plugin-details entry is available only when the Host provides the capabilities above.
+
 ## [4.31.0] - 2026-09-29
 
 ### Added / 新增
@@ -1395,7 +1411,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.31.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.32.0...HEAD
+[4.32.0]: https://github.com/xmanrui/dsh-im/compare/v4.31.0...v4.32.0
 [4.31.0]: https://github.com/xmanrui/dsh-im/compare/v4.30.0...v4.31.0
 [4.30.0]: https://github.com/xmanrui/dsh-im/compare/v4.29.1...v4.30.0
 [4.29.1]: https://github.com/xmanrui/dsh-im/compare/v4.29.0...v4.29.1
