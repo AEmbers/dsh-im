@@ -251,6 +251,26 @@
       ]
     },
     {
+      "login": "DoodleBears",
+      "name": "DoodleBear",
+      "avatar_url": "https://avatars.githubusercontent.com/u/62061729",
+      "profile": "https://github.com/DoodleBears",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/293"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/293"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/293"
+        }
+      ]
+    },
+    {
       "login": "evanfang0054",
       "name": "Evan Fang",
       "avatar_url": "https://avatars.githubusercontent.com/u/34673339",

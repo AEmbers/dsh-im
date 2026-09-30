@@ -6,7 +6,15 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 同 Host 的公开 `dshIm` Service 新增版本化账号描述和条件纯文本发送：Feishu/Lark 账号由平台认证身份确定，目标以固定内容摘要校验，旧 `send` 行为保持兼容；未支持的渠道返回明确错误。感谢 [@DoodleBears](https://github.com/DoodleBears) 的代码、文档和测试贡献（[#293](https://github.com/xmanrui/dsh-im/pull/293)）。
+  The same-Host public `dshIm` Service adds versioned account descriptions and checked plain-text sends. Feishu/Lark account identity is authenticated against the platform, destinations are checked against a frozen content digest, legacy `send` remains compatible, and unsupported channels return an explicit error. Thanks to [@DoodleBears](https://github.com/DoodleBears) for code, documentation and tests ([#293](https://github.com/xmanrui/dsh-im/pull/293)).
+
 ### Fixed / 修复
+
+- 条件投递在最后一次异步账号核验后、SDK 请求开始前再次检查渠道注册、控制器关闭状态和取消信号；凭据读取与平台认证失败返回 `account-unverified`，避免将尚未发送的请求误判为结果未知。
+  Checked delivery revalidates the channel Registration, controller lifecycle and cancellation after its final asynchronous account verification, before the SDK request starts. Credential lookup and platform authentication failures return `account-unverified` instead of reporting an uncertain message outcome before any send.
 
 - 修复 Host 语言设置在未注入的 Context 中读取时报错，以及新版 DSH 切换界面语言后 IM 回复和命令菜单未同步的问题。兼容新旧 settings API，渠道启动前等待语言初始化，settings 服务撤销时清理监听并回退到镜像语言。感谢 [@resetsix](https://github.com/resetsix)（[#288](https://github.com/xmanrui/dsh-im/pull/288)，修复 [#287](https://github.com/xmanrui/dsh-im/issues/287)）。
   Fixed Host language settings being read from a Context without injection, and IM replies and command menus not following interface-language changes in newer DSH versions. Supports both settings APIs, waits for language initialization before channels start, and cleans up observers and falls back to the mirrored language when the settings service is withdrawn. Thanks to [@resetsix](https://github.com/resetsix) ([#288](https://github.com/xmanrui/dsh-im/pull/288), fixes [#287](https://github.com/xmanrui/dsh-im/issues/287)).

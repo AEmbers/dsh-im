@@ -233,6 +233,14 @@ export function createDeliveryAdapter({ channel, workspaces, coreController, sta
   }
   return Object.freeze({
     channel,
+    describeAccount: (botId) => {
+      if (typeof coreController.describeDeliveryAccount !== 'function') {
+        const error = new Error('Verified account capability unavailable');
+        error.code = 'capability-unavailable';
+        throw error;
+      }
+      return coreController.describeDeliveryAccount(botId);
+    },
     ownsBot: (botId) => workspaces.has(botId),
     listBots: () => workspaces.listBotIds(),
     async listTargets(botId) {
