@@ -533,7 +533,7 @@ test('Feishu topic parsing is stateless across admission, handling and later mes
   }
 });
 
-test('extractInboundMessage exposes a native Feishu file as a lazy unbounded resource download', async () => {
+test('extractInboundMessage exposes a native Feishu file as a lazy streaming resource download', async () => {
   const calls = [];
   const bytes = Buffer.from('ordinary-file-payload');
   const event = {
@@ -556,7 +556,10 @@ test('extractInboundMessage exposes a native Feishu file as a lazy unbounded res
   assert.equal(message.files.length, 1);
   assert.equal(message.files[0].name, 'report.bin');
   assert.equal(calls.length, 0, 'file download stays lazy');
-  assert.deepEqual(await message.files[0].load({}), bytes);
+  const { stream } = await message.files[0].load({});
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  assert.deepEqual(Buffer.concat(chunks), bytes);
   assert.deepEqual(calls, [{
     path: { message_id: 'om_file', file_key: 'file_test' },
     params: { type: 'file' },

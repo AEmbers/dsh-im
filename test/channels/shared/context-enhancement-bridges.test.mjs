@@ -107,7 +107,13 @@ function fixture(channel, { contextEnhancement, onAsk } = {}) {
       calls.push(['ask', sessionId, content, Object.keys(options).sort()]);
       for (const file of options.files ?? []) {
         const loaded = await file.load({ signal: options.signal });
-        calls.push(['file', file.name, Buffer.from(loaded?.data ?? loaded).toString('hex')]);
+        const chunks = [];
+        if (loaded?.stream) {
+          for await (const chunk of loaded.stream) chunks.push(Buffer.from(chunk));
+        } else {
+          chunks.push(Buffer.from(loaded?.data ?? loaded));
+        }
+        calls.push(['file', file.name, Buffer.concat(chunks).toString('hex')]);
       }
       return onAsk ? onAsk({ sessionId, content, options, prompts }) : 'answer unchanged';
     },

@@ -13,6 +13,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Fixed / 修复
 
+- 飞书图片或文件资源整文件下载返回 `234037` 时，自动改用每次最多 8 MiB 的顺序 Range 请求，并校验响应范围、总大小和实际字节数。普通附件直接流式落盘；图片继续遵守现有大小限制，取消或失败时清理未完成的附件。（[#266](https://github.com/xmanrui/dsh-im/issues/266)） 感谢 [@luochen211](https://github.com/luochen211)（[#289](https://github.com/xmanrui/dsh-im/pull/289)）。
+  Feishu image and file downloads now fall back to sequential Range requests of at most 8 MiB when the full download returns `234037`, validating ranges, total size, and actual byte counts. Ordinary attachments stream directly to disk; images retain their existing size limits, and cancelled or failed downloads clean up incomplete attachments. ([#266](https://github.com/xmanrui/dsh-im/issues/266)) Thanks to [@luochen211](https://github.com/luochen211) ([#289](https://github.com/xmanrui/dsh-im/pull/289)).
+
 - 条件投递在最后一次异步账号核验后、SDK 请求开始前再次检查渠道注册、控制器关闭状态和取消信号；凭据读取与平台认证失败返回 `account-unverified`，避免将尚未发送的请求误判为结果未知。
   Checked delivery revalidates the channel Registration, controller lifecycle and cancellation after its final asynchronous account verification, before the SDK request starts. Credential lookup and platform authentication failures return `account-unverified` instead of reporting an uncertain message outcome before any send.
 
