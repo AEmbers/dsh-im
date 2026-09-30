@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import {
   conversationKey,
@@ -2307,7 +2308,9 @@ export class FeishuHarnessBridge {
     // A used card is recent even if it was first created long ago.
     this.#cardKeys.delete(messageId);
     this.#cardKeys.set(messageId, route);
-    const entry = { ...route, messageId, selections: multiValues, operatorOpenId };
+    const newSessionActionId = nonEmptyString(actionValue.newSessionActionId);
+    if (resolvedAction === 'new' && (!route.menuContext || !newSessionActionId)) return Promise.resolve();
+    const entry = { ...route, messageId, selections: multiValues, operatorOpenId, newSessionActionId };
     const source = nonEmptyString(actionValue.source);
     const formText = nonEmptyString(formValue.steer_text);
     const eventId = nonEmptyString(event?.event_id)
@@ -2316,6 +2319,7 @@ export class FeishuHarnessBridge {
       ?? nonEmptyString(event?.header?.uuid);
     const identity = JSON.stringify({
       messageId,
+      newSessionActionId,
       resolvedAction,
       option,
       multiValues,
@@ -2517,6 +2521,8 @@ export class FeishuHarnessBridge {
     sessionLimit = null,
     selections = [],
     actor = null,
+    menuContext = null,
+    newSessionActionId = null,
   }) {
     // Confirmations triggered by a card interaction stay anchored to the
     // card's message so they land inside the same Feishu topic.
@@ -2666,6 +2672,10 @@ export class FeishuHarnessBridge {
       return;
     }
     if (action === 'new') {
+      if (menuContext || newSessionActionId) {
+        await this.#handleNewSessionMenu({ key, chatId, messageId, menuContext, newSessionActionId });
+        return;
+      }
       if (this.#queues.has(key) || this.#hasPendingInteraction(key)) {
         await reply(t('当前任务仍在运行，请先停止任务或等待任务完成后再开启新会话。'));
         return;
@@ -2797,6 +2807,61 @@ export class FeishuHarnessBridge {
         );
       }
     }
+  }
+
+  async #handleNewSessionMenu({ key, chatId, messageId, menuContext, newSessionActionId }) {
+    // The generation belongs to this rendered menu, not the whole conversation.
+    // Check inside the queue as well as consuming the action before any await:
+    // distinct provider events and late callbacks must not clear a later session.
+    const action = menuContext?.newSessionAction;
+    if (!action || this.#cardKeys.get(messageId)?.menuContext !== menuContext
+      || action.id !== newSessionActionId
+      || !['idle', 'failed'].includes(action.status)) return;
+
+    action.status = 'processing';
+    delete action.message;
+    await this.#patchCardMessage(chatId, messageId, menuCard(menuContext));
+
+    const finish = async (status, message = null) => {
+      if (menuContext.currentSession && !this.#state.sessionFor(key)) {
+        menuContext.currentSession = null;
+        // The old menu may show a session-specific model. After unbinding,
+        // refresh the bot default just as opening a fresh menu would.
+        try {
+          menuContext.modelCatalog = await this.#harness.listModels({ signal: this.#cardDataSignal() });
+        } catch {
+          menuContext.modelCatalog = null;
+        }
+      }
+      menuContext.newSessionAction = {
+        id: status === 'failed' ? randomUUID() : action.id,
+        status,
+        message,
+      };
+      const patched = await this.#patchCardMessage(chatId, messageId, menuCard(menuContext));
+      if (!patched) {
+        await this.#send(chatId, t('新会话操作的卡片状态未能更新，请发送 /m 重新打开菜单。'), { replyTo: messageId })
+          .catch((error) => this.#logger.warn?.('[dsh-feishu] menu state notice failed:', error?.message));
+      }
+    };
+    // A task can start while Feishu is updating the processing card.
+    if (this.#queues.has(key) || this.#hasPendingInteraction(key)) {
+      const message = t('当前任务仍在运行，请先停止任务或等待任务完成后再开启新会话。');
+      await finish('failed', message);
+      await this.#send(chatId, message, { replyTo: messageId });
+      return;
+    }
+    try {
+      await this.#state.clearSession(key);
+    } catch (error) {
+      // A persistence error can still leave the in-memory binding cleared.
+      await finish('failed', safeErrorText(error));
+      throw error;
+    }
+    await finish('success');
+    // A receipt delivery failure must not turn a completed reset into a retry.
+    await this.#send(chatId, t('已开启全新 Harness 会话。'), { replyTo: messageId })
+      .catch((error) => this.#logger.warn?.('[dsh-feishu] new session receipt failed:', error?.message));
   }
 
   #rememberMenu(key, menu) {
@@ -3002,6 +3067,7 @@ export class FeishuHarnessBridge {
       key: options.key,
       chatId,
       conversationWorkspace: options.conversationWorkspace,
+      menuContext: options.menuContext ?? null,
       sessionWorkspace: typeof options.sessionWorkspace === 'string' && options.sessionWorkspace
         ? options.sessionWorkspace
         : null,
@@ -3213,14 +3279,16 @@ export class FeishuHarnessBridge {
     }
     const archiveVisible = this.#state?.includesArchivedSessions?.() ?? false;
     this.#rememberMenu(key, { kind: 'menu', chatId });
+    const menuContext = {
+      workspaces, currentWorkspace,
+      currentSession: currentSessionId ? { id: currentSessionId, title: currentSessionTitle } : null,
+      sessions, archiveVisible, presetCatalog, modelCatalog,
+      newSessionAction: { id: randomUUID(), status: 'idle' },
+    };
     await this.#sendCard(
       chatId,
-      menuCard({
-        workspaces, currentWorkspace,
-        currentSession: currentSessionId ? { id: currentSessionId, title: currentSessionTitle } : null,
-        sessions, archiveVisible, presetCatalog, modelCatalog,
-      }),
-      { key, updateMessageId, replyTo, conversationWorkspace },
+      menuCard(menuContext),
+      { key, updateMessageId, replyTo, conversationWorkspace, menuContext },
     );
   }
 

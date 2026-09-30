@@ -123,6 +123,7 @@ function backButton() {
  *   - archiveVisible: boolean       (归档显隐开关当前值)
  *   - presetCatalog: object|null    (预设目录, {items,defaultId,_currentId})
  *   - modelCatalog: object|null     (模型目录, {groups,current})
+ *   - newSessionAction: {id,status,message?}|null (新会话按钮的执行状态)
  * Number fallback: 1=续写 2=新会话 3=会话列表 4=状态
  * 5=补全权限 6=帮助.
  */
@@ -135,6 +136,7 @@ export function menuCard(ctx) {
     archiveVisible = false,
     presetCatalog = null,
     modelCatalog = null,
+    newSessionAction = null,
   } = ctx || {};
 
   // currentSession 提供 id/title；为兼容旧调用，也接受 currentSessionTitle
@@ -145,6 +147,19 @@ export function menuCard(ctx) {
   const hasSessions = sessionOptions.length > 0;
   const hasWorkspaces = Array.isArray(workspaces) && workspaces.length > 0;
   const elements = [];
+
+  let newSessionLabel = t('🆕 新会话');
+  if (newSessionAction?.status === 'processing') {
+    newSessionLabel = t('正在开启…');
+    elements.push({ tag: 'div', text: plainText(t('正在开启新会话…')) });
+  } else if (newSessionAction?.status === 'success') {
+    newSessionLabel = t('已执行：新会话');
+    elements.push({ tag: 'div', text: plainText(t('已执行：新会话。发送消息即可开始。')) });
+  } else if (newSessionAction?.status === 'failed') {
+    elements.push({ tag: 'div', text: plainText(t('新会话操作失败：{message}', {
+      message: newSessionAction.message || t('卡片操作失败，请稍后重试。'),
+    })) });
+  }
 
   // ── 设置区 ──────────────────────────────────────────────────
   elements.push({ tag: 'div', text: markdown(t('**设置**')) });
@@ -270,7 +285,15 @@ export function menuCard(ctx) {
   });
 
   // 新会话 + 全部会话按钮
-  elements.push(buttonPair(t('🆕 新会话'), 'new', t('📋 会话/关注'), 'sessions'));
+  const sessionButtons = buttonPair(newSessionLabel, 'new', t('📋 会话/关注'), 'sessions');
+  const newSessionButton = sessionButtons.columns[0].elements[0];
+  if (newSessionAction?.id) {
+    newSessionButton.behaviors[0].value.newSessionActionId = newSessionAction.id;
+  }
+  if (newSessionAction?.status === 'processing' || newSessionAction?.status === 'success') {
+    newSessionButton.disabled = true;
+  }
+  elements.push(sessionButtons);
   if (!hasSessions && !hasWorkspaces) {
     elements.push(button(t('🗂 工作区列表'), 'workspaces'));
   }

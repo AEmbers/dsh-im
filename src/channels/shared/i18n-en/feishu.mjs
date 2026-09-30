@@ -143,6 +143,8 @@ export default {
   '请输入补充指令后再提交。': 'Enter an instruction before submitting.',
   '操作过于频繁，请稍后再试。': 'Too many card actions are pending. Please try again shortly.',
   '卡片操作失败，请稍后重试。': 'The card action failed. Please try again later.',
+  '新会话操作的卡片状态未能更新，请发送 /m 重新打开菜单。':
+    'Could not update the new-session card status. Send /m to reopen the menu.',
   '请先选择至少一个会话。': 'Select at least one session first.',
   '已批量关注 {count} 个会话。': 'Now watching {count} sessions.',
   '已批量关注 {count} 个会话，另有 {failed} 个未成功。':
@@ -187,6 +189,11 @@ export default {
   '🤖 切换预设': '🤖 Switch preset',
   '🧠 切换模型': '🧠 Switch model',
   '🆕 新会话': '🆕 New session',
+  '正在开启…': 'Starting…',
+  '已执行：新会话': 'Done: new session',
+  '正在开启新会话…': 'Starting a new session…',
+  '已执行：新会话。发送消息即可开始。': 'Done: new session. Send a message to start.',
+  '新会话操作失败：{message}': 'New session action failed: {message}',
   '📋 会话/关注': '📋 Sessions / watches',
   '🗂 工作区列表': '🗂 Workspace list',
   '**任务控制**': '**Task controls**',
