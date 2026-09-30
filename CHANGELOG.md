@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 同 Host 的公开 `dshIm` Service 新增版本化账号描述和条件纯文本发送：Feishu/Lark 账号由平台认证身份确定，目标以固定内容摘要校验，旧 `send` 行为保持兼容；未支持的渠道返回明确错误。
+  The same-Host public `dshIm` Service adds versioned account descriptions and checked plain-text sends. Feishu/Lark account identity is authenticated against the platform, destinations are checked against a frozen content digest, legacy `send` remains compatible, and unsupported channels return an explicit error.
+
 ### Fixed / 修复
 
 - 修复 Host 语言设置在未注入的 Context 中读取时报错，以及新版 DSH 切换界面语言后 IM 回复和命令菜单未同步的问题。兼容新旧 settings API，渠道启动前等待语言初始化，settings 服务撤销时清理监听并回退到镜像语言。感谢 [@resetsix](https://github.com/resetsix)（[#288](https://github.com/xmanrui/dsh-im/pull/288)，修复 [#287](https://github.com/xmanrui/dsh-im/issues/287)）。
