@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 修复 Host 语言设置在未注入的 Context 中读取时报错，以及新版 DSH 切换界面语言后 IM 回复和命令菜单未同步的问题。兼容新旧 settings API，渠道启动前等待语言初始化，settings 服务撤销时清理监听并回退到镜像语言。感谢 [@resetsix](https://github.com/resetsix)（[#288](https://github.com/xmanrui/dsh-im/pull/288)，修复 [#287](https://github.com/xmanrui/dsh-im/issues/287)）。
+  Fixed Host language settings being read from a Context without injection, and IM replies and command menus not following interface-language changes in newer DSH versions. Supports both settings APIs, waits for language initialization before channels start, and cleans up observers and falls back to the mirrored language when the settings service is withdrawn. Thanks to [@resetsix](https://github.com/resetsix) ([#288](https://github.com/xmanrui/dsh-im/pull/288), fixes [#287](https://github.com/xmanrui/dsh-im/issues/287)).
+
 ## [4.32.0] - 2026-09-29
 
 ### Added / 新增

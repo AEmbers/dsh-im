@@ -607,6 +607,22 @@
       ]
     },
     {
+      "login": "resetsix",
+      "name": "twinkle",
+      "avatar_url": "https://avatars.githubusercontent.com/u/85431995",
+      "profile": "https://github.com/resetsix",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/288"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/288"
+        }
+      ]
+    },
+    {
       "login": "rosalynthompson32-a11y",
       "name": "Biertolovisk",
       "avatar_url": "https://avatars.githubusercontent.com/u/313334391",
