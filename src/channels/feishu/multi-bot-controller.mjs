@@ -1,5 +1,5 @@
 import { atConnectionStage, createConnectionDiagnostics } from '../shared/connection-error.mjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { connectionTestMessage } from '../shared/connection-test.mjs';
 import { publicMessageFailure } from '../shared/message-failure.mjs';
 import { RegistrationManager } from './registration-manager.mjs';
@@ -563,10 +563,51 @@ export class MultiBotDshFeishuController {
     });
   }
 
+  async #deliveryAccount(config) {
+    const resolved = await this.#credentials.resolve(config.secretRef);
+    if (!resolved?.value) {
+      const error = new Error('Account credentials unavailable');
+      error.code = 'account-unverified';
+      throw error;
+    }
+    const verified = await this.#verifyApp({ appId: config.appId, appSecret: resolved.value, domain: config.domain });
+    if (!verified?.openId || verified.openId !== config.botOpenId) {
+      const error = new Error('Authenticated account identity changed');
+      error.code = 'account-changed';
+      throw error;
+    }
+    const fingerprint = createHash('sha256').update(JSON.stringify({
+      provider: 'feishu', domain: config.domain, appId: config.appId, botOpenId: verified.openId,
+    })).digest('hex');
+    return { fingerprint, ...(verified.name ? { name: verified.name } : {}) };
+  }
+
+  async describeDeliveryAccount(botId) {
+    this.#assertOpen();
+    return this.#withBotTransition(botId, async () => {
+      this.#assertOpen();
+      const config = this.#requireBot(botId);
+      const account = await this.#deliveryAccount(config);
+      return { version: 1, botId, channel: 'feishu', account,
+        connected: isConnected(connectionStatus(this.#runtimes.get(botId))),
+        capabilities: ['proactive-text-checked'] };
+    });
+  }
+
   async sendProactiveText(botId, target, text, options = {}) {
     this.#assertOpen();
     return this.#withBotTransition(botId, async () => {
-      this.#requireBot(botId);
+      this.#assertOpen();
+      const config = this.#requireBot(botId);
+      if (options.expectedFingerprint !== undefined) {
+        const account = await this.#deliveryAccount(config);
+        if (account.fingerprint !== options.expectedFingerprint) {
+          const error = new Error('Authenticated account identity changed');
+          error.code = 'account-changed';
+          throw error;
+        }
+        options.signal?.throwIfAborted();
+      }
       const runtime = this.#runtimes.get(botId);
       if (!isConnected(connectionStatus(runtime))
         || typeof runtime.sendProactiveText !== 'function') {

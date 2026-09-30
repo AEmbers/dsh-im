@@ -295,3 +295,79 @@ test('DeliveryService marks explicit remote Harness channels unavailable for Ses
   });
   assert.deepEqual(calls, [['bot_one', 'direct', false]]);
 });
+
+function checkedFixture() {
+  const service = createDeliveryService();
+  const adapter = memoryAdapter({channel: 'feishu'});
+  const fingerprint = 'a'.repeat(64);
+  adapter.describeAccount = async () => ({version: 1, botId: 'bot_one', channel: 'feishu',
+    connected: true, capabilities: ['proactive-text-checked'], account: {fingerprint}});
+  return {service, adapter, fingerprint};
+}
+
+async function checkedTarget(fx) {
+  const target = {targetId: 'self', kind: 'user', route: {openId: 'ou_self'}};
+  await fx.service.createTarget('bot_one', target);
+  const {createHash} = await import('node:crypto');
+  return createHash('sha256').update(JSON.stringify({kind: target.kind, route: target.route})).digest('hex');
+}
+
+test('checked sending rejects changed targets and account identities before a side effect', async () => {
+  const fx = checkedFixture(); fx.service.registerAdapter(fx.adapter);
+  const digest = await checkedTarget(fx);
+  await assert.rejects(fx.service.sendChecked('bot_one', 'self', 'hello', {
+    expectedFingerprint: 'b'.repeat(64), expectedTargetDigest: digest,
+  }), {code: 'account-changed'});
+  await fx.service.updateTarget('bot_one', 'self', {kind: 'user', route: {openId: 'ou_other'}});
+  await assert.rejects(fx.service.sendChecked('bot_one', 'self', 'hello', {
+    expectedFingerprint: fx.fingerprint, expectedTargetDigest: digest,
+  }), {code: 'target-changed'});
+  assert.equal(fx.adapter.sends.length, 0);
+});
+
+test('checked sending freezes the authorized route across an alias edit during account verification', async () => {
+  const fx = checkedFixture(); fx.service.registerAdapter(fx.adapter);
+  const digest = await checkedTarget(fx);
+  const describe = fx.adapter.describeAccount;
+  fx.adapter.describeAccount = async () => {
+    await fx.adapter.updateTarget('bot_one', 'self', {kind: 'user', route: {openId: 'ou_other'}});
+    return describe();
+  };
+  assert.deepEqual(await fx.service.sendChecked('bot_one', 'self', 'hello', {
+    expectedFingerprint: fx.fingerprint, expectedTargetDigest: digest,
+  }), {sent: true});
+  assert.deepEqual(fx.adapter.sends[0][1].route, {openId: 'ou_self'});
+  assert.equal(fx.adapter.sends[0][3].expectedFingerprint, fx.fingerprint);
+});
+
+test('checked sending fails closed when its Registration is disposed during preflight', async () => {
+  const fx = checkedFixture(); const dispose = fx.service.registerAdapter(fx.adapter);
+  const digest = await checkedTarget(fx);
+  const describe = fx.adapter.describeAccount;
+  fx.adapter.describeAccount = async () => {dispose(); return describe();};
+  await assert.rejects(fx.service.sendChecked('bot_one', 'self', 'hello', {
+    expectedFingerprint: fx.fingerprint, expectedTargetDigest: digest,
+  }), {code: 'capability-unavailable'});
+  assert.equal(fx.adapter.sends.length, 0);
+});
+
+test('legacy providers cannot advertise checked sending implicitly', async () => {
+  const fx = checkedFixture(); delete fx.adapter.describeAccount; fx.service.registerAdapter(fx.adapter);
+  await assert.rejects(fx.service.describeBot('bot_one'), {code: 'capability-unavailable'});
+});
+
+
+test('checked account discovery fences replacement even when the same adapter object is registered again', async () => {
+  const service = createDeliveryService();
+  const adapter = memoryAdapter();
+  let calls = 0;
+  adapter.describeAccount = async () => {
+    ++calls;
+    service.registerAdapter(adapter);
+    return {version: 1, botId: 'bot_one', channel: 'telegram', account: {fingerprint: 'a'.repeat(64)}, connected: true, capabilities: ['proactive-text-checked']};
+  };
+  service.registerAdapter(adapter);
+  await assert.rejects(service.describeBot('bot_one'), {code: 'capability-unavailable'});
+  assert.equal(calls, 1);
+  assert.equal(adapter.sends.length, 0);
+});
