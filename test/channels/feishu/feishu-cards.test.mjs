@@ -96,6 +96,66 @@ test('menu exposes the increased command set and keeps permission completion num
   assert.equal(actions.includes('repair'), false);
 });
 
+test('menu new-session states remain visible while only that action is disabled', () => {
+  const context = {
+    workspaces: ['/work'],
+    currentWorkspace: '/work',
+    sessions: [{ id: 'session-one', title: 'Session One' }],
+    presetCatalog: { items: [{ id: 'preset-one', label: 'Preset One' }] },
+    modelCatalog: {
+      groups: [{ id: 'provider', name: 'Provider', models: [
+        { id: 'model-one', name: 'Model One' },
+        { id: 'model-two', name: 'Model Two' },
+      ] }],
+    },
+  };
+  const baseline = JSON.parse(menuCard(context));
+  const otherButtons = (card) => buttons(card).filter((button) => button.behaviors[0].value.action !== 'new');
+  for (const [status, label, notice, disabled] of [
+    ['idle', '🆕 新会话', null, false],
+    ['processing', '正在开启…', '正在开启新会话…', true],
+    ['success', '已执行：新会话', '已执行：新会话。发送消息即可开始。', true],
+    ['failed', '🆕 新会话', '新会话操作失败：**failure** <error>', false],
+  ]) {
+    const id = `new-session-${status}`;
+    const card = JSON.parse(menuCard({
+      ...context,
+      newSessionAction: { id, status, message: '**failure** <error>' },
+    }));
+    const newButton = buttons(card).find((button) => button.behaviors[0].value.action === 'new');
+    assert.deepEqual(newButton.text, { tag: 'plain_text', content: label });
+    assert.deepEqual(newButton.behaviors, [{ type: 'callback', value: { action: 'new', newSessionActionId: id } }]);
+    assert.equal(newButton.disabled === true, disabled, `${status} button availability`);
+    if (notice) {
+      assert.deepEqual(card.body.elements[0], { tag: 'div', text: { tag: 'plain_text', content: notice } });
+    } else {
+      assert.deepEqual(card.body.elements[0], baseline.body.elements[0]);
+    }
+    assert.deepEqual(otherButtons(card), otherButtons(baseline), `${status} must preserve other menu buttons`);
+    assert.deepEqual(selects(card), selects(baseline), `${status} must preserve all menu dropdowns`);
+    assert.equal(card.config, undefined, 'action feedback must not change card-wide interaction settings');
+  }
+});
+
+test('menu new-session feedback is localized in English, including a failure without details', () => {
+  setImHostLanguage('en');
+  try {
+    for (const [status, label, notice] of [
+      ['processing', 'Starting…', 'Starting a new session…'],
+      ['success', 'Done: new session', 'Done: new session. Send a message to start.'],
+      ['failed', '🆕 New session', 'New session action failed: The card action failed. Please try again later.'],
+    ]) {
+      const card = JSON.parse(menuCard({ newSessionAction: { id: 'action-one', status } }));
+      const newButton = buttons(card).find((button) => button.behaviors[0].value.action === 'new');
+      assert.equal(newButton.text.content, label);
+      assert.equal(card.body.elements[0].text.content, notice);
+      assert.doesNotMatch(JSON.stringify(card), /[\u3400-\u9fff]/u);
+    }
+  } finally {
+    setImHostLanguage('zh');
+  }
+});
+
 test('menu and card help advertise Agent Preset, reasoning, and batch commands', () => {
   const help = menuHelpText();
   assert.match(help, /\/presetlist/);
