@@ -106,6 +106,10 @@ async function committedArtifact(t, {
       ],
     },
   };
+  t.after(registry.openConsumer(sessionId, rpcId));
+  for (const event of agent.session.events) {
+    registry.observeSessionEvent(agent.session, event);
+  }
   await writeFile(join(workspace, fileName), content);
   const tool = createOutboundArtifactTool({ registry });
   const exec = {

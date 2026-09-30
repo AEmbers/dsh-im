@@ -834,6 +834,7 @@ for (const failHandoff of [false, true]) {
           { type: 'turn/start', data: { turn: 2 } },
           { type: 'user/message', data: { turn: 2, source: { rpcId: promptRpcId } } },
         ];
+        for (const event of agent.session.events) outboundArtifactRegistry.observeSessionEvent(agent.session, event);
         const exec = {
           name: OUTBOUND_ARTIFACT_TOOL,
           callId: 'file-only-call',
@@ -1783,4 +1784,41 @@ test('tracker (all mode) recovers the final answer in the same reconnect scenari
 
   assert.equal(tracker.finished, true);
   assert.equal(tracker.answer, '先读取文件\n\n最终答案');
+});
+
+
+test('HarnessClient does not advertise a file consumer without an artifact callback', async (t) => {
+  outboundArtifactRegistry.clear();
+  t.after(() => outboundArtifactRegistry.clear());
+  const workspace = await mkdtemp(join(tmpdir(), 'dsh-im-no-file-consumer-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  await writeFile(join(workspace, 'file.txt'), 'file');
+  const client = new HarnessClient({ baseUrl: 'http://127.0.0.1:3080', workspace });
+  client.ensureRunning = async () => undefined;
+  const session = { header: { id: 'session-no-file-consumer', cwd: workspace }, events: [] };
+  const tool = createOutboundArtifactTool({ registry: outboundArtifactRegistry });
+  let prompted = false;
+  client.rpc = async (method, _payload, _timeoutMs, options) => {
+    if (method === 'session.prompt') {
+      prompted = true;
+      session.events = [
+        { type: 'turn/start', seq: 1, data: { turn: 1 } },
+        { type: 'user/message', seq: 2, data: { turn: 1, source: { rpcId: options.rpcId } } },
+      ];
+      for (const event of session.events) outboundArtifactRegistry.observeSessionEvent(session, event);
+      assert.equal(outboundArtifactRegistry.hasActiveConsumer(session), false);
+      await assert.rejects(tool.definition.execute({ path: 'file.txt' }, {
+        name: OUTBOUND_ARTIFACT_TOOL, agent: { session }, callId: 'no-consumer',
+      }), { code: 'artifact-consumer-required' });
+      return {};
+    }
+    assert.equal(method, 'session.history');
+    if (!prompted) return { events: [] };
+    return { events: [...session.events,
+      { type: 'assistant/message', seq: 3, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'Use present.' }] } } },
+      { type: 'turn/end', seq: 4, data: { turn: 1, reason: { kind: 'completed' } } },
+    ].map((event) => ({ event })) };
+  };
+  assert.equal(await client.ask(session.header.id, 'return the file'), 'Use present.');
+  assert.deepEqual(outboundArtifactRegistry.take(session.header.id, 1), []);
 });

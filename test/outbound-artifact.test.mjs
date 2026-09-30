@@ -15,7 +15,7 @@ import {
 } from '../src/channels/shared/semantic/artifact.mjs';
 import { symlinkOrSkip } from './support/filesystem.mjs';
 
-async function fixture(t) {
+async function fixture(t, { consumer = true } = {}) {
   const workspace = await mkdtemp(join(tmpdir(), 'dsh-im-artifact-workspace-'));
   const outside = await mkdtemp(join(tmpdir(), 'dsh-im-artifact-outside-'));
   t.after(async () => {
@@ -36,7 +36,13 @@ async function fixture(t) {
       ],
     },
   };
-  return { workspace, outside, registry, agent };
+  let closeConsumer;
+  if (consumer) {
+    closeConsumer = registry.openConsumer('session-artifact', 'rpc-artifact');
+    for (const event of agent.session.events) registry.observeSessionEvent(agent.session, event);
+    t.after(closeConsumer);
+  }
+  return { workspace, outside, registry, agent, closeConsumer };
 }
 
 function execution(agent, callId, overrides = {}) {
@@ -64,12 +70,16 @@ async function takeFile(registry, sessionId = 'session-artifact', turn = 7) {
 }
 
 test('file return reads modern Session event snapshots', async (t) => {
-  const fx = await fixture(t);
+  const fx = await fixture(t, { consumer: false });
   const events = fx.agent.session.events;
   fx.agent.session = {
     header: fx.agent.session.header,
     snapshotEvents: () => Object.freeze(events),
   };
+  t.after(fx.registry.openConsumer('session-artifact', 'rpc-artifact'));
+  fx.registry.observeSessionEvent(fx.agent.session, {
+    type: 'user/message', data: { source: { rpcId: 'rpc-artifact' } },
+  });
   await writeFile(join(fx.workspace, 'modern.txt'), 'modern session');
   const tool = createOutboundArtifactTool({ registry: fx.registry });
 
@@ -83,11 +93,15 @@ test('file return reads modern Session event snapshots', async (t) => {
 });
 
 test('file return prefers snapshotEvents over a stale session.events array', async (t) => {
-  const fx = await fixture(t);
+  const fx = await fixture(t, { consumer: false });
   fx.agent.session.events = [];
   fx.agent.session.snapshotEvents = () => Object.freeze([
     { type: 'turn/start', data: { turn: 7 } },
   ]);
+  t.after(fx.registry.openConsumer('session-artifact', 'rpc-artifact'));
+  fx.registry.observeSessionEvent(fx.agent.session, {
+    type: 'user/message', data: { source: { rpcId: 'rpc-artifact' } },
+  });
   await writeFile(join(fx.workspace, 'prefer.txt'), 'prefer snapshot');
   const tool = createOutboundArtifactTool({ registry: fx.registry });
 
@@ -100,7 +114,7 @@ test('file return prefers snapshotEvents over a stale session.events array', asy
 });
 
 test('file return still requires a live Session turn on modern snapshots', async (t) => {
-  const fx = await fixture(t);
+  const fx = await fixture(t, { consumer: false });
   fx.agent.session = {
     header: fx.agent.session.header,
     snapshotEvents: () => Object.freeze([
@@ -271,7 +285,7 @@ test('Session and Turn ownership routes files only to the originating conversati
   releaseOutboundArtifact(artifact);
 });
 
-test('a completed Turn without a channel consumer releases its unclaimed snapshot', async (t) => {
+test('a released consumer leaves no snapshot for a completed Turn', async (t) => {
   const fx = await fixture(t);
   await writeFile(join(fx.workspace, 'unclaimed.txt'), 'unclaimed');
   const artifact = await fx.registry.stage(
@@ -279,6 +293,7 @@ test('a completed Turn without a channel consumer releases its unclaimed snapsho
     execution(fx.agent, 'unclaimed'),
   );
   fx.registry.commit(artifact);
+  fx.closeConsumer();
 
   fx.registry.observeSessionEvent(
     { id: 'session-artifact' },
@@ -423,28 +438,54 @@ test('exact reads have no independent timeout and preserve caller cancellation',
   );
 });
 
-test('Host installer always exposes the tool and explicitly permits existing files', () => {
+test('Host installer exposes the tool but only guides the current owned IM Turn', () => {
   let definition;
   const listeners = new Map();
-  let section;
+  let context;
+  const registry = new OutboundArtifactRegistry();
   const installed = installOutboundArtifactTool({
     tools: { register(value) { definition = value; } },
     on(name, value) { listeners.set(name, value); },
-    systemPrompt: { section(value) { section = value; } },
-  }, { registry: new OutboundArtifactRegistry() });
+    systemPrompt: {
+      context(value) { context = value; },
+      section() { assert.fail('file-return guidance must not be global'); },
+    },
+  }, { registry });
 
   assert.equal(installed, true);
   assert.equal(definition.name, OUTBOUND_ARTIFACT_TOOL);
+  assert.match(definition.description, /active IM delivery consumer/);
+  assert.match(definition.description, /host present tool/);
   assert.match(definition.description, /Existing and newly created files are both valid/);
   assert.match(definition.description, /Success means queued, not sent/);
   assert.match(definition.output.render({}, { fileName: 'result.zip', size: 123 })[0].text, /has not been sent yet/);
-  assert.match(section.text, /Existing files can be sent directly/);
-  assert.match(section.text, /after your turn finishes/);
+  assert.equal(context.name, 'dsh-im:return-file');
+  const session = { id: 'im-session' };
+  const assembly = { agent: { session } };
+  const observe = (type, data) => listeners.get('session/event')(session, { type, data });
+  assert.equal(context.text(assembly), '');
+  assert.equal(context.text(undefined), '');
+  const close = registry.openConsumer(session.id, 'plain-rpc-id');
+  observe('turn/start', { turn: 1 });
+  assert.equal(context.text(assembly), '', 'a queued consumer does not own the current Turn');
+  observe('user/message', { source: { rpcId: 'weixin-unregistered' } });
+  assert.equal(context.text(assembly), '', 'a channel-looking prefix grants no ownership');
+  observe('user/message', { source: { rpcId: 'plain-rpc-id' } });
+  assert.match(context.text(assembly), /Existing files can be sent directly/);
+  assert.match(context.text(assembly), /after your turn finishes/);
+  assert.equal(context.text({ agent: { session: { id: 'web-session' } } }), '');
+  observe('turn/end', { turn: 1 });
+  observe('turn/start', { turn: 2 });
+  observe('user/message', { source: { rpcId: 'web-rpc' } });
+  assert.equal(context.text(assembly), '', 'the previous IM consumer cannot guide a Web Turn');
+  close();
+  const closeNext = registry.openConsumer(session.id, 'next-im-rpc');
+  observe('user/message', { source: { rpcId: 'next-im-rpc' } });
+  assert.match(context.text(assembly), /call dsh_im_return_file/);
+  closeNext();
+  assert.equal(context.text(assembly), '', 'released consumers contribute no guidance');
   assert.equal(typeof listeners.get('tools/result'), 'function');
-  assert.equal(typeof listeners.get('session/event'), 'function');
   assert.equal(typeof listeners.get('session/disposed'), 'function');
-  assert.equal(listeners.has('agent/inbox/claimed'), false);
-  assert.equal(listeners.has('system-prompt/assemble'), false);
   assert.equal(installOutboundArtifactTool({}), false);
 });
 
@@ -478,7 +519,7 @@ test('file return rejects once the observed turn has closed without any session 
 });
 
 test('file return rejects a bare session without snapshot or observed turn activity', async (t) => {
-  const fx = await fixture(t);
+  const fx = await fixture(t, { consumer: false });
   fx.agent.session = { header: fx.agent.session.header };
   const tool = createOutboundArtifactTool({ registry: fx.registry });
 
@@ -486,5 +527,51 @@ test('file return rejects a bare session without snapshot or observed turn activ
     tool.definition.execute({ path: 'bare.txt' }, execution(fx.agent, 'bare')),
     (error) => error.code === 'artifact-context-required'
       && error.message === 'A live Harness Session is required to return a file.',
+  );
+});
+
+for (const rpcId of ['bare-web-uuid', 'weixin-unregistered']) {
+  test(`file return rejects an unowned Turn even with rpcId ${rpcId}`, async (t) => {
+    const fx = await fixture(t, { consumer: false });
+    fx.agent.session.events[1].data.source.rpcId = rpcId;
+    for (const event of fx.agent.session.events) fx.registry.observeSessionEvent(fx.agent.session, event);
+    await writeFile(join(fx.workspace, 'web.txt'), 'web file');
+    const tool = createOutboundArtifactTool({ registry: fx.registry });
+    await assert.rejects(
+      tool.definition.execute({ path: 'web.txt' }, execution(fx.agent, 'web')),
+      (error) => error.code === 'artifact-consumer-required'
+        && /not queued/.test(error.message) && /host present tool/.test(error.message),
+    );
+    assert.deepEqual(fx.registry.take('session-artifact', 7), []);
+  });
+}
+
+test('file return rejects a released consumer before reading the requested path', async (t) => {
+  const fx = await fixture(t);
+  fx.closeConsumer();
+  await assert.rejects(
+    fx.registry.stage({ path: 'missing.txt' }, execution(fx.agent, 'released')),
+    { code: 'artifact-consumer-required' },
+  );
+});
+
+test('file return cannot use an unrelated pending consumer', async (t) => {
+  const fx = await fixture(t, { consumer: false });
+  fx.registry.openConsumer('other-session', 'rpc-artifact');
+  fx.registry.openConsumer('session-artifact', 'different-rpc');
+  for (const event of fx.agent.session.events) fx.registry.observeSessionEvent(fx.agent.session, event);
+  await assert.rejects(
+    fx.registry.stage({ path: 'missing.txt' }, execution(fx.agent, 'unrelated')),
+    { code: 'artifact-consumer-required' },
+  );
+});
+
+test('an observed Turn end overrides a stale open Session snapshot', async (t) => {
+  const fx = await fixture(t);
+  fx.registry.observeSessionEvent(fx.agent.session, { type: 'turn/end', data: { turn: 7 } });
+  assert.equal(fx.registry.hasActiveConsumer(fx.agent.session), false);
+  await assert.rejects(
+    fx.registry.stage({ path: 'missing.txt' }, execution(fx.agent, 'stale')),
+    { code: 'artifact-context-required' },
   );
 });

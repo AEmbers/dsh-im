@@ -495,6 +495,7 @@ test('an accepted stop preserves partial text but never hands off a registered a
       ],
     },
   };
+  for (const event of agent.session.events) outboundArtifactRegistry.observeSessionEvent(agent.session, event);
   await writeFile(join(workspace, 'must-not-send.txt'), 'cancelled result');
   const tool = createOutboundArtifactTool({ registry: outboundArtifactRegistry });
   const exec = {
@@ -540,6 +541,7 @@ test('an accepted stop also discards a file-only result instead of handing it of
       ],
     },
   };
+  for (const event of agent.session.events) outboundArtifactRegistry.observeSessionEvent(agent.session, event);
   await writeFile(join(workspace, 'must-not-send.txt'), 'cancelled file-only result');
   const tool = createOutboundArtifactTool({ registry: outboundArtifactRegistry });
   const exec = {
