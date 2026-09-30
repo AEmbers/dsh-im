@@ -564,13 +564,16 @@ export class MultiBotDshFeishuController {
   }
 
   async #deliveryAccount(config) {
-    const resolved = await this.#credentials.resolve(config.secretRef);
-    if (!resolved?.value) {
-      const error = new Error('Account credentials unavailable');
+    let verified;
+    try {
+      const resolved = await this.#credentials.resolve(config.secretRef);
+      if (!resolved?.value) throw new Error('Account credentials unavailable');
+      verified = await this.#verifyApp({ appId: config.appId, appSecret: resolved.value, domain: config.domain });
+    } catch (cause) {
+      const error = new Error('Account credentials could not be verified', { cause });
       error.code = 'account-unverified';
       throw error;
     }
-    const verified = await this.#verifyApp({ appId: config.appId, appSecret: resolved.value, domain: config.domain });
     if (!verified?.openId || verified.openId !== config.botOpenId) {
       const error = new Error('Authenticated account identity changed');
       error.code = 'account-changed';
@@ -583,11 +586,12 @@ export class MultiBotDshFeishuController {
   }
 
   async describeDeliveryAccount(botId) {
-    this.#assertOpen();
+    this.#assertOpen('capability-unavailable');
     return this.#withBotTransition(botId, async () => {
-      this.#assertOpen();
+      this.#assertOpen('capability-unavailable');
       const config = this.#requireBot(botId);
       const account = await this.#deliveryAccount(config);
+      this.#assertOpen('capability-unavailable');
       return { version: 1, botId, channel: 'feishu', account,
         connected: isConnected(connectionStatus(this.#runtimes.get(botId))),
         capabilities: ['proactive-text-checked'] };
@@ -595,17 +599,22 @@ export class MultiBotDshFeishuController {
   }
 
   async sendProactiveText(botId, target, text, options = {}) {
-    this.#assertOpen();
+    const checked = options.expectedFingerprint !== undefined;
+    this.#assertOpen(checked ? 'capability-unavailable' : undefined);
     return this.#withBotTransition(botId, async () => {
-      this.#assertOpen();
+      this.#assertOpen(checked ? 'capability-unavailable' : undefined);
       const config = this.#requireBot(botId);
-      if (options.expectedFingerprint !== undefined) {
+      if (checked) {
         const account = await this.#deliveryAccount(config);
         if (account.fingerprint !== options.expectedFingerprint) {
           const error = new Error('Authenticated account identity changed');
           error.code = 'account-changed';
           throw error;
         }
+        // Account verification yields; a Registration can be replaced or disposed
+        // before the SDK request starts. Recheck its owner at the effect boundary.
+        options.beforeSend?.();
+        this.#assertOpen('capability-unavailable');
         options.signal?.throwIfAborted();
       }
       const runtime = this.#runtimes.get(botId);
@@ -1427,8 +1436,12 @@ export class MultiBotDshFeishuController {
     return config;
   }
 
-  #assertOpen() {
-    if (this.#closed) throw new Error('The Feishu controller is closed');
+  #assertOpen(code) {
+    if (this.#closed) {
+      const error = new Error('The Feishu controller is closed');
+      if (code) error.code = code;
+      throw error;
+    }
   }
 
   #serializeConfig(operation) {

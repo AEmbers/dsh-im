@@ -341,9 +341,12 @@ export class DeliveryService {
         throw deliveryError('capability-unavailable');
       }
       if (account.account?.fingerprint !== expectedFingerprint) throw deliveryError('account-changed');
-      cancellation(signal);
-      this.#assertRegistered(registration);
-      await adapter.sendText(id, target, text, { signal, expectedFingerprint,
+      const beforeSend = () => {
+        cancellation(signal);
+        this.#assertRegistered(registration);
+      };
+      beforeSend();
+      await adapter.sendText(id, target, text, { signal, expectedFingerprint, beforeSend,
         ...(format === 'markdown' ? { format } : {}) });
       return { sent: true };
     } catch (error) { throw publicOperationError(error); }
