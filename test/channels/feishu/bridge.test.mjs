@@ -1285,11 +1285,14 @@ test('bridge hands a native Feishu file source to the current Harness turn', asy
     harness: {
       sessionExists: async () => true,
       ask: async (sessionId, prompt, options) => {
+        const { stream } = await options.files[0].load({ signal: options.signal });
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
         asked.push({
           sessionId,
           prompt,
           name: options.files[0].name,
-          bytes: await options.files[0].load({ signal: options.signal }),
+          bytes: Buffer.concat(chunks),
         });
         return '文件已收到';
       },

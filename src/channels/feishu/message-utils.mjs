@@ -1,8 +1,11 @@
+import { addAbortSignal, Readable } from 'node:stream';
+import { downloadFeishuResourceRanges } from './resource-download.mjs';
 import { imageDownloadLimitMessage } from '../shared/image-prompt.mjs';
 import { ImagePromptError } from '../shared/image-prompt.mjs';
 import { t } from '../shared/i18n.mjs';
 
 const FEISHU_MISSING_MESSAGE_SCOPE_CODE = 99991672;
+const FEISHU_RESOURCE_SIZE_LIMIT_CODE = 234037;
 const FEISHU_CARD_MESSAGE_CONTENT_TYPE = 'raw_card_content';
 const FEISHU_ERROR_BODY_LIMIT = 64 * 1024;
 const FEISHU_ERROR_BODY_TIMEOUT_MS = 1_000;
@@ -305,31 +308,6 @@ async function readBoundedStream(stream, { signal, maxBytes }) {
   }
 }
 
-async function readStream(stream, { signal }) {
-  if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
-    throw new Error('Feishu file download returned no readable stream');
-  }
-  signal?.throwIfAborted();
-  const abort = () => stream.destroy?.(
-    signal.reason ?? new DOMException('Feishu file download aborted', 'AbortError'),
-  );
-  signal?.addEventListener('abort', abort, { once: true });
-  const chunks = [];
-  let size = 0;
-  try {
-    for await (const chunk of stream) {
-      signal?.throwIfAborted();
-      const data = Buffer.from(chunk);
-      size += data.length;
-      chunks.push(data);
-    }
-    signal?.throwIfAborted();
-    return Buffer.concat(chunks, size);
-  } finally {
-    signal?.removeEventListener('abort', abort);
-  }
-}
-
 function providerCode(value) {
   if (!value || typeof value !== 'object') return null;
   const code = value.code ?? value.error?.code;
@@ -375,7 +353,7 @@ async function feishuProviderCode(error, signal) {
     seen.add(value);
     const directCode = providerCode(value);
     const data = value.response?.data ?? value.data;
-    if (directCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE) {
+    if (directCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE || directCode === FEISHU_RESOURCE_SIZE_LIMIT_CODE) {
       data?.destroy?.();
       return directCode;
     }
@@ -383,21 +361,22 @@ async function feishuProviderCode(error, signal) {
       const body = await readFeishuErrorBody(data, signal);
       try {
         const parsedCode = providerCode(JSON.parse(body));
-        if (parsedCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE) return parsedCode;
+        if (parsedCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE || parsedCode === FEISHU_RESOURCE_SIZE_LIMIT_CODE) return parsedCode;
       } catch {
         // Non-JSON provider failures keep the generic image download message.
       }
     } else {
       const dataCode = providerCode(data);
-      if (dataCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE) return dataCode;
+      if (dataCode === FEISHU_MISSING_MESSAGE_SCOPE_CODE || dataCode === FEISHU_RESOURCE_SIZE_LIMIT_CODE) return dataCode;
     }
     pending.push(value.cause);
   }
   return null;
 }
 
-async function feishuImageDownloadError(error, signal) {
-  if (await feishuProviderCode(error, signal) !== FEISHU_MISSING_MESSAGE_SCOPE_CODE) return error;
+async function feishuImageDownloadError(error, signal, code = undefined) {
+  if (code === undefined) code = await feishuProviderCode(error, signal);
+  if (code !== FEISHU_MISSING_MESSAGE_SCOPE_CODE) return error;
   return new ImagePromptError(
     'feishu-image-permission-required',
     'Feishu image download requires the im:message:readonly tenant scope',
@@ -406,33 +385,59 @@ async function feishuImageDownloadError(error, signal) {
   );
 }
 
+async function feishuResourceStream(event, client, key, type, { signal, maxBytes } = {}) {
+  signal?.throwIfAborted();
+  const path = { message_id: event.message.message_id, file_key: key };
+  let resource;
+  try {
+    resource = await client?.im?.v1?.messageResource?.get?.({ path, params: { type } });
+  } catch (error) {
+    if (signal?.aborted) {
+      error?.response?.data?.destroy?.();
+      signal.throwIfAborted();
+    }
+    const code = await feishuProviderCode(error, signal);
+    if (code !== FEISHU_RESOURCE_SIZE_LIMIT_CODE) {
+      throw type === 'image' ? await feishuImageDownloadError(error, signal, code) : error;
+    }
+    return Readable.from((async function* ranges() {
+      try {
+        yield* downloadFeishuResourceRanges(client, path, type, { signal, maxBytes });
+      } catch (error) {
+        try {
+          throw type === 'image' ? await feishuImageDownloadError(error, signal) : error;
+        } finally {
+          error?.response?.data?.destroy?.();
+        }
+      }
+    }()), { objectMode: false, signal });
+  }
+  const stream = resource?.getReadableStream?.();
+  try {
+    signal?.throwIfAborted();
+    const size = declaredSize(resource?.headers);
+    if (size !== null && size > maxBytes) {
+      throw new ImagePromptError(
+        'image-too-large',
+        `Feishu image declares ${size} bytes; the limit is ${maxBytes}`,
+        imageDownloadLimitMessage(maxBytes),
+      );
+    }
+    if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
+      throw new Error(`Feishu ${type} download returned no readable stream`);
+    }
+    return signal ? addAbortSignal(signal, stream) : stream;
+  } catch (error) {
+    stream?.destroy?.();
+    throw error;
+  }
+}
+
 function feishuImageSource(event, client, key) {
   return {
     async load({ signal, maxBytes }) {
-      signal?.throwIfAborted();
-      let resource;
-      try {
-        resource = await client?.im?.v1?.messageResource?.get?.({
-          path: {
-            message_id: event.message.message_id,
-            file_key: key,
-          },
-          params: { type: 'image' },
-        });
-      } catch (error) {
-        throw await feishuImageDownloadError(error, signal);
-      }
-      signal?.throwIfAborted();
-      const size = declaredSize(resource?.headers);
-      if (size !== null && size > maxBytes) {
-        resource?.getReadableStream?.().destroy?.();
-        throw new ImagePromptError(
-          'image-too-large',
-          `Feishu image declares ${size} bytes; the limit is ${maxBytes}`,
-          imageDownloadLimitMessage(maxBytes),
-        );
-      }
-      return readBoundedStream(resource?.getReadableStream?.(), { signal, maxBytes });
+      const stream = await feishuResourceStream(event, client, key, 'image', { signal, maxBytes });
+      return readBoundedStream(stream, { signal, maxBytes });
     },
   };
 }
@@ -443,16 +448,8 @@ function feishuFileSource(event, client, file) {
   return {
     name: nonEmptyString(file?.file_name) ?? 'file',
     async load({ signal } = {}) {
-      signal?.throwIfAborted();
-      const resource = await client?.im?.v1?.messageResource?.get?.({
-        path: {
-          message_id: event.message.message_id,
-          file_key: key,
-        },
-        params: { type: 'file' },
-      });
-      signal?.throwIfAborted();
-      return readStream(resource?.getReadableStream?.(), { signal });
+      const stream = await feishuResourceStream(event, client, key, 'file', { signal });
+      return { stream };
     },
   };
 }

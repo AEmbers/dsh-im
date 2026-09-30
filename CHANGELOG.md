@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 飞书图片或文件资源整文件下载返回 `234037` 时，自动改用每次最多 8 MiB 的顺序 Range 请求，并校验响应范围、总大小和实际字节数。普通附件直接流式落盘；图片继续遵守现有大小限制，取消或失败时清理未完成的附件。（[#266](https://github.com/xmanrui/dsh-im/issues/266)）
+  Feishu image and file downloads now fall back to sequential Range requests of at most 8 MiB when the full download returns `234037`, validating ranges, total size, and actual byte counts. Ordinary attachments stream directly to disk; images retain their existing size limits, and cancelled or failed downloads clean up incomplete attachments. ([#266](https://github.com/xmanrui/dsh-im/issues/266))
+
 ## [4.32.0] - 2026-09-29
 
 ### Added / 新增
