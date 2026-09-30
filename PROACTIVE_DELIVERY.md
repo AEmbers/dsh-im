@@ -85,6 +85,7 @@
 1. DSH Web／CLI 向该私聊当前绑定的 Session 提交的用户文字，会以 `[来自 DSH]` 开头发送到私聊。
 2. 该 Turn 成功完成后，按 step 合并的最终助手文字会以 `[DSH 助手]` 开头再发送一次。
 3. IM 用户自己的普通提问和 `/steer` 仍走原回复链，不会被同步逻辑重复发送或转发给其他目标。
+4. 定时任务（`schedule`、`deliveryMode: host`）在绑定 Session 中成功完成后，也会同步最终助手文字；内部提醒提示不会以 `[来自 DSH]` 消息回显到私聊。
 
 开关只保存私聊目标，不保存 `sessionId`，因此会自动跟随 `/session` 切换。执行 `/new` 或切换工作区后，状态暂时显示「等待该私聊建立新会话」；该私聊下一次建立 Session 后自动恢复，无需重新开关。
 
@@ -353,3 +354,13 @@ Connection RPC 默认只允许当前 Host 的回环调用。若 Web profile 明�
 ### 测试成功但对方没有看到消息
 
 测试成功只证明平台接口接受发送。请继续检查机器人权限、平台限制、目标是否正确，以及客户端侧的消息过滤或归档设置。
+
+## Companion Plugin 的条件主动发送
+
+same-Host `dshIm` Service 新增 `contractVersion:1`、`describeBot(botId)` 和 `sendChecked(botId,targetId,text,options)`。首版认证账号实现只支持飞书/Lark；其他渠道在实现此契约前明确返回 `capability-unavailable`。现有 `send`、HTTP 与管理 RPC 不变。
+
+`describeBot` 返回 `{version:1,botId,channel,account:{fingerprint,name?},connected,capabilities}`；`proactive-text-checked` capability 不是用户授权。飞书/Lark 通过 credentials service 解析凭据，并向平台验证当前 Bot Open ID。fingerprint 为按固定字段顺序 `JSON.stringify({provider:'feishu',domain,appId,botOpenId})` 的 UTF-8 小写 SHA-256，不返回凭据或 token；平台身份与已配置的 verified bot 不同则拒绝。Host 启动时账号异步初始化，需要后续刷新 discovery。
+
+options 必须包含 `expectedFingerprint`、`expectedTargetDigest`，可选 `signal`、`format`。目标 digest 为 `JSON.stringify({kind,route})` 的 UTF-8 小写 SHA-256，route keys 按 JavaScript 字符串 code-unit 升序排列；名称和 alias 不参与。发送检查当前 saved target，冻结规范化 route，再在账号 transition 内重新验证认证身份后使用此 route；验证期间编辑 alias 不会改投。lookup 前删除或改址会拒绝；请求已经开始后，修改不能撤销外部效果。
+
+`account-unverified`、`account-changed`、`target-changed`、`capability-unavailable` 是发送前拒绝；凭据读取与平台认证失败也返回 `account-unverified`。`{sent:true}` 仍只代表平台接受，不代表送达/已读。SDK 开始后的取消、超时和含糊失败不能证明没有发送；调用者持有 durable authorization／intent／attempt 与 reconciliation，不得盲重试。Provider Registration 撤销或控制器关闭会拒绝尚未开始 SDK 请求的条件投递，包括在最后一次账号核验期间发生的撤销；不能撤回已开始的 SDK 请求。

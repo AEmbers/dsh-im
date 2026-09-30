@@ -1319,3 +1319,28 @@ for (const entry of ['manual', 'scan']) {
     await fx.controller.close();
   });
 }
+
+test('delivery account fingerprint is authenticated and checked inside the sending transition', async () => {
+  const existing = bot('bot_checked', 'checked');
+  let principal = existing.botOpenId;
+  const fx = fixture({bots: [existing], secrets: {[existing.secretRef]: 'local-secret'},
+    verifyApp: async ({appId, appSecret}) => {
+      assert.equal(appId, existing.appId); assert.equal(appSecret, 'local-secret');
+      return {openId: principal, name: 'Verified bot'};
+    }});
+  await fx.controller.initialize();
+  const info = await fx.controller.describeDeliveryAccount(existing.id);
+  assert.equal(info.version, 1); assert.equal(info.connected, true);
+  assert.match(info.account.fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(info).includes('local-secret'), false);
+  const target = {targetId: 'self', kind: 'user', route: {openId: 'ou_self'}};
+  await fx.controller.sendProactiveText(existing.id, target, 'hello', {expectedFingerprint: info.account.fingerprint});
+  principal = 'ou_other_bot';
+  await assert.rejects(fx.controller.sendProactiveText(existing.id, target, 'hello', {
+    expectedFingerprint: info.account.fingerprint,
+  }), {code: 'account-changed'});
+  assert.equal(fx.runtimes.get(existing.id)[0].proactiveSends.length, 1);
+  fx.values.delete(existing.secretRef);
+  await assert.rejects(fx.controller.describeDeliveryAccount(existing.id), {code: 'account-unverified'});
+  await fx.controller.close();
+});

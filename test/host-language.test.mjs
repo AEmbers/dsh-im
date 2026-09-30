@@ -201,15 +201,13 @@ test('installHostLanguage follows the DSH locale preference live and tolerates a
   const fiber = ctx.plugin({
     apply: (pluginCtx) => {
       language = installHostLanguage(pluginCtx, { dshHome: home });
-      // Channels start inside this same activation, so an already-attached
-      // settings service has to be read synchronously; waiting for the
-      // injection callback would let the first bot register its command menu
-      // in the previous language and then need a second push.
-      atInstall = language.snapshot();
+      // Channel activation awaits ready; an available preference must win
+      // before the first channel starts, without an un-injected read.
+      atInstall = language.ready.then(() => language.snapshot());
     },
   });
   await fiber.await();
-  assert.deepEqual(atInstall, { language: 'zh', tag: 'zh', source: 'settings', pinned: false });
+  assert.deepEqual(await atInstall, { language: 'zh', tag: 'zh', source: 'settings', pinned: false });
   await language.ready;
   assert.equal(getImHostLanguage(), 'zh', 'an explicit Chinese selection outranks the English mirror');
 
@@ -295,4 +293,47 @@ test('the language RPC reports the resolved snapshot and mirrors the interface l
   assert.equal(failure.error.code, 'interface-language-unavailable');
   assert.doesNotMatch(JSON.stringify(failure), /private/);
   assert.throws(() => createHostLanguageRpcHandler({}), TypeError);
+});
+
+test('settings access stays injected across late arrival, withdrawal and replacement', async (t) => {
+  restoreLanguage(t);
+  const root = new Context();
+  const warnings = [];
+  let language;
+  const store = { load: async () => {}, getLanguageTag: () => 'en' };
+  const consumer = root.plugin({ apply(ctx) {
+    const guarded = Object.create(ctx);
+    Object.defineProperty(guarded, 'inject', { value: ctx.inject.bind(ctx) });
+    Object.defineProperty(guarded, 'settings', { get() {
+      throw new Error('settings accessed outside injection');
+    } });
+    Object.defineProperty(guarded, 'logger', { value: () => ({ warn: (...args) => warnings.push(args) }) });
+    language = installHostLanguage(guarded, {}, { store });
+  } });
+  t.after(() => consumer.dispose());
+  await consumer.await();
+  await language.ready;
+  assert.equal(language.snapshot().source, 'mirror');
+  let preference = 'zh';
+  const provide = () => root.plugin({ apply(ctx) {
+    ctx.provide('settings', { describe: () => [{ ns: 'locale', value: { preference } }] });
+  } });
+  const first = provide();
+  await first.await();
+  await new Promise(setImmediate);
+  assert.equal(language.snapshot().language, 'zh');
+  preference = 'en';
+  root.emit('settings/document-updated', 'locale');
+  assert.equal(getImHostLanguage(), 'en');
+  assert.equal(language.snapshot().language, 'en');
+  await first.dispose();
+  assert.equal(language.snapshot().source, 'mirror');
+  preference = 'zh';
+  const second = provide();
+  await second.await();
+  await new Promise(setImmediate);
+  assert.equal(language.snapshot().language, 'zh');
+  await second.dispose();
+  assert.equal(language.snapshot().source, 'mirror');
+  assert.deepEqual(warnings, []);
 });

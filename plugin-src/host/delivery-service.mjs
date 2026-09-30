@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { normalizeDeliveryTarget } from './delivery-adapter.mjs';
 
 const BOT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -18,6 +19,10 @@ const ADAPTER_METHODS = Object.freeze([
 
 const DELIVERY_ERROR_CODES = new Set([
   'bad-request',
+  'account-unverified',
+  'account-changed',
+  'target-changed',
+  'capability-unavailable',
   'unknown-bot',
   'unknown-target',
   'target-conflict',
@@ -290,6 +295,63 @@ export class DeliveryService {
     }
   }
 
+  #assertRegistered(registration) {
+    if (this.#adapters.get(registration.adapter.channel) !== registration) {
+      throw deliveryError('capability-unavailable');
+    }
+  }
+
+  async describeBot(botId) {
+    const id = botIdOf(botId);
+    const registration = await this.#checkedRegistrationFor(id);
+    const { adapter } = registration;
+    if (typeof adapter.describeAccount !== 'function') throw deliveryError('capability-unavailable');
+    this.#assertRegistered(registration);
+    try {
+      const account = await adapter.describeAccount(id);
+      this.#assertRegistered(registration);
+      return account;
+    } catch (error) { throw publicOperationError(error); }
+  }
+
+  async sendChecked(botId, targetId, text, { expectedFingerprint, expectedTargetDigest, signal, format = 'plain' } = {}) {
+    const id = botIdOf(botId);
+    const key = targetIdOf(targetId);
+    if (typeof text !== 'string' || !text.trim() || !['plain', 'markdown'].includes(format)
+      || !/^[a-f0-9]{64}$/.test(expectedFingerprint ?? '') || !/^[a-f0-9]{64}$/.test(expectedTargetDigest ?? '')) {
+      throw deliveryError('bad-request');
+    }
+    cancellation(signal);
+    const registration = await this.#checkedRegistrationFor(id);
+    const { adapter } = registration;
+    if (typeof adapter.describeAccount !== 'function') throw deliveryError('capability-unavailable');
+    this.#assertRegistered(registration);
+    try {
+      const candidates = await adapter.listTargets(id);
+      const saved = candidates.find((target) => target?.targetId === key);
+      if (!saved) throw deliveryError('unknown-target');
+      const target = normalizeDeliveryTarget(adapter.channel, {
+        targetId: saved.targetId, kind: saved.kind, route: structuredClone(saved.route),
+      });
+      const digest = createHash('sha256').update(JSON.stringify({ kind: target.kind,
+        route: Object.fromEntries(Object.entries(target.route).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) })).digest('hex');
+      if (digest !== expectedTargetDigest) throw deliveryError('target-changed');
+      const account = await adapter.describeAccount(id);
+      if (account?.version !== 1 || !account.capabilities?.includes('proactive-text-checked')) {
+        throw deliveryError('capability-unavailable');
+      }
+      if (account.account?.fingerprint !== expectedFingerprint) throw deliveryError('account-changed');
+      const beforeSend = () => {
+        cancellation(signal);
+        this.#assertRegistered(registration);
+      };
+      beforeSend();
+      await adapter.sendText(id, target, text, { signal, expectedFingerprint, beforeSend,
+        ...(format === 'markdown' ? { format } : {}) });
+      return { sent: true };
+    } catch (error) { throw publicOperationError(error); }
+  }
+
   async send(botId, targetIdOrDraft, text, { signal, format = 'plain' } = {}) {
     const id = botIdOf(botId);
     const targetKey = typeof targetIdOrDraft === 'string'
@@ -326,6 +388,19 @@ export class DeliveryService {
       }
       throw publicOperationError(error);
     }
+  }
+
+  async #checkedRegistrationFor(botId) {
+    for (const registration of this.#adapters.values()) {
+      let ownsBot;
+      try { ownsBot = await registration.adapter.ownsBot(botId); }
+      catch (error) { throw publicOperationError(error); }
+      if (ownsBot) {
+        this.#assertRegistered(registration);
+        return registration;
+      }
+    }
+    throw deliveryError('unknown-bot', 'Unknown bot');
   }
 
   async #adapterFor(botId) {

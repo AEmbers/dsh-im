@@ -251,6 +251,26 @@
       ]
     },
     {
+      "login": "DoodleBears",
+      "name": "DoodleBear",
+      "avatar_url": "https://avatars.githubusercontent.com/u/62061729",
+      "profile": "https://github.com/DoodleBears",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/293"
+        },
+        {
+          "type": "doc",
+          "url": "https://github.com/xmanrui/dsh-im/pull/293"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/293"
+        }
+      ]
+    },
+    {
       "login": "evanfang0054",
       "name": "Evan Fang",
       "avatar_url": "https://avatars.githubusercontent.com/u/34673339",
@@ -603,6 +623,22 @@
         {
           "type": "doc",
           "url": "https://github.com/xmanrui/dsh-im/commit/64b9ac8b6e4ba760bc0e182f700cc5be7fffb94f"
+        }
+      ]
+    },
+    {
+      "login": "resetsix",
+      "name": "twinkle",
+      "avatar_url": "https://avatars.githubusercontent.com/u/85431995",
+      "profile": "https://github.com/resetsix",
+      "contributions": [
+        {
+          "type": "code",
+          "url": "https://github.com/xmanrui/dsh-im/pull/288"
+        },
+        {
+          "type": "test",
+          "url": "https://github.com/xmanrui/dsh-im/pull/288"
         }
       ]
     },
