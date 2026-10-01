@@ -199,6 +199,8 @@ async function createContext(options = {}) {
     stopped = true;
     await runtime.stop();
     fake.drainPendings?.();
+    // Finish queued history writes before the suite removes their temporary directory.
+    await options.roomHistory?.flush();
   };
   return { runtime, fake, sidecar, state, logger, harness, stop };
 }
