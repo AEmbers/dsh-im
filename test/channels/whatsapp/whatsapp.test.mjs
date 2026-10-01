@@ -40,6 +40,7 @@ import {
   createWhatsappRpcHandler,
 } from '../../../plugin-src/host/channels/whatsapp/rpc.mjs';
 import { assertRestrictiveMode } from '../../support/filesystem.mjs';
+import { accessPolicyProvider } from '../../../plugin-src/host/channels/shared/access-policy-production.mjs';
 
 const ACCOUNT_JID = '16505550123@s.whatsapp.net';
 const ACCOUNT_LID = '123456789012345@lid';
@@ -807,10 +808,9 @@ test('WhatsApp runtime uses live unified policy settings and existing JID alias 
     authDir: '/tmp/test-whatsapp-auth',
     harness,
     state,
-    accessPolicy: {
-      getSettings: () => accessSettings,
-      isPrivileged: (senderIds) => senderIds.includes(ACCOUNT_JID),
-    },
+    accessPolicy: accessPolicyProvider({ accessPolicyFor: () => accessSettings }, 'whatsapp_test', {
+      channel: 'whatsapp', config: { accountJid: ACCOUNT_JID }, equals: whatsappAccessPolicyIdsEqual,
+    }),
     createSession: async (options) => {
       callbacks = options;
       return {
@@ -835,6 +835,19 @@ test('WhatsApp runtime uses live unified policy settings and existing JID alias 
   });
   assert.ok(calls.some((call) => call[0] === 'message'
     && call[2].text === 'Harness answer'), 'linked owner bypasses an empty allowlist');
+  const ownerGroupJid = '120363000000000001@g.us';
+  await callbacks.onMessage({
+    key: { remoteJid: ownerGroupJid, id: 'owner-group-policy', fromMe: true },
+    message: { conversation: 'owner group bypass' },
+  });
+  assert.ok(calls.some((call) => call[0] === 'message' && call[1] === ownerGroupJid
+    && call[2].text === 'Harness answer'), 'linked owner bypasses an empty group allowlist');
+  const beforeEcho = calls.length;
+  await callbacks.onMessage({
+    key: { remoteJid: ownerGroupJid, id: 'reply-1', fromMe: true },
+    message: { conversation: 'Harness answer' },
+  });
+  assert.equal(calls.length, beforeEcho, 'privileged access must not bypass outgoing-message loop protection');
   accessSettings = {
     ...accessSettings,
     direct: {

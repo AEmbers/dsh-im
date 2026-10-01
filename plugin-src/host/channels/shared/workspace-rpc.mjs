@@ -26,6 +26,7 @@ export function publicWorkspaceError(error) {
     'model-selection-unavailable',
     'model-reasoning-unavailable',
     'context-enhancement-invalid',
+    'access-policy-invalid',
   ].includes(error?.code)) return null;
   return { code: error.code, message: error.message };
 }

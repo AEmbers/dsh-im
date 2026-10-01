@@ -109,6 +109,7 @@ export function privilegedSenderIdsFor(channel, config = {}) {
   }
   if (key === 'qq') return cleanIds(config.ownerUserOpenid).filter((id) => id !== '*');
   if (key === 'whatsapp') return cleanIds(config.accountJid);
+  if (key === 'discord') return cleanIds(config.ownerUserId);
   return [];
 }
 

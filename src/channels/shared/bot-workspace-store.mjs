@@ -2136,6 +2136,7 @@ export function createWorkspaceAwareController(controller, {
   stateFor,
   agentPresetCatalog,
   modelCatalog,
+  validateAccessPolicyForBot,
 } = {}) {
   if (!controller || !workspaces || typeof stateFor !== 'function') {
     throw new TypeError('controller, workspaces, and stateFor are required');
@@ -2289,6 +2290,9 @@ export function createWorkspaceAwareController(controller, {
         error.code = 'workspace-bot-not-found';
         throw error;
       }
+      // Channel-specific identity checks must finish before projecting or
+      // committing the new policy. Existing channels need no extra validation.
+      await validateAccessPolicyForBot?.(botId, policy);
       const [catalog, models] = await Promise.all([
         resolveAgentPresetCatalog(agentPresetCatalog),
         resolveModelCatalog(modelCatalog),

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FeishuHarnessBridge } from '../../../src/channels/feishu/bridge.mjs';
-import { directAccessPolicy } from '../access-policy-fixture.mjs';
+import { configuredAccessPolicy, directAccessPolicy } from '../access-policy-fixture.mjs';
 
 // 桥接层的语音回合(渠道能力):音频消息经转写进入正常文字流水线,
 // 完整答案投递后追加音频回复;转写失败走"仅支持文字/图片/文件"的明确降级。
@@ -387,6 +387,18 @@ test('a transcribed command executes for a sender with command permission', asyn
   assert.match(JSON.parse(replies[0].data.content).text, /已开启/);
   // 命令类回复不触发语音。
   assert.equal(uploads.length, 0);
+});
+
+test('a confirmed Feishu owner can execute a voice command with an empty allowlist', async () => {
+  const accessPolicy = configuredAccessPolicy({ channel: 'feishu', config: { ownerOpenIds: ['ou_user'] } });
+  const archivedCalls = [];
+  const state = stateFixture().state;
+  state.setIncludeArchivedSessions = async (value) => archivedCalls.push(value);
+  const { bridge, replies } = runBridge({ voice: fakeVoice('/archived on'), accessPolicy, state });
+  bridge.accept(audioEvent('om_owner_voice', 'file_key_owner'));
+  await bridge.waitForIdle();
+  assert.deepEqual(archivedCalls, [true]);
+  assert.match(JSON.parse(replies[0].data.content).text, /已开启/);
 });
 
 test('a transcribed plain chat from a sender without command permission still answers', async () => {

@@ -1411,11 +1411,20 @@ export class FeishuHarnessBridge {
     return current;
   }
 
+  #logAccessDenied(conversationType, reason) {
+    this.#logger.info?.('[dsh-feishu] inbound access denied', {
+      botId: this.#accessPolicy?.botId,
+      conversationType,
+      reason,
+    });
+  }
+
   #finishAccessDecision(event, messageId, access) {
     let current;
     current = Promise.resolve().then(async () => {
       if (this.#state.hasSeen(messageId)) return;
       await this.#state.markSeen(messageId);
+      this.#logAccessDenied(event.message.chat_type === 'p2p' ? 'direct' : 'group', access.reason);
       if (access.reason === 'command-not-allowed') {
         this.#status.lastMessageAt = new Date().toISOString();
         this.#status.messagesReceived += 1;
@@ -1659,6 +1668,7 @@ export class FeishuHarnessBridge {
           || (!hasImages && !hasFiles && NUMBER_REPLY.test(text) && this.#menus.has(key)),
       });
       if (!transcribedAccess.allowed) {
+        this.#logAccessDenied(event.message.chat_type === 'p2p' ? 'direct' : 'group', transcribedAccess.reason);
         if (transcribedAccess.reason === 'command-not-allowed') {
           await this.#send(
             event.message.chat_id,
@@ -2310,11 +2320,11 @@ export class FeishuHarnessBridge {
       isCommand: !isInteractionResponse,
     });
     if (!access.allowed) {
+      this.#logAccessDenied(conversationType, access.reason);
       if (access.reason === 'command-not-allowed') {
         return this.#send(route.chatId, t(COMMAND_PERMISSION_DENIED_MESSAGE))
           .catch(() => undefined);
       }
-      this.#logger.warn?.('[dsh-feishu] ignoring card action blocked by access policy');
       return Promise.resolve();
     }
     // A used card is recent even if it was first created long ago.

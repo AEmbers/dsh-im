@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { evaluateInboundAccess } from '../src/channels/shared/inbound-access.mjs';
 
 import {
   accessPolicyProvider,
@@ -127,6 +128,58 @@ test('Host privileged identities come only from durable owner or legacy authoriz
   }), ['886900000000@s.whatsapp.net']);
   for (const channel of ['wecom', 'slack', 'telegram', 'discord']) {
     assert.deepEqual(privilegedSenderIdsFor(channel, { allowedUsers: ['legacy'] }), []);
+  }
+});
+
+test('confirmed owners bypass live allowlist and command restrictions without granting other users access', () => {
+  const cases = [
+    ['weixin', { ownerUserId: 'wx-owner' }, 'wx-owner'],
+    ['feishu', { ownerOpenIds: ['*', 'ou_owner'] }, 'ou_owner'],
+    ['qq', { ownerUserOpenid: 'qq-owner' }, 'qq-owner'],
+    ['whatsapp', { accountJid: '16505550100@s.whatsapp.net' }, '16505550100@s.whatsapp.net'],
+    ['discord', { ownerUserId: '123456789012345678' }, '123456789012345678'],
+  ];
+  for (const [channel, config, owner] of cases) {
+    let current;
+    const provider = accessPolicyProvider({ accessPolicyFor: () => current }, channel, { channel, config });
+    for (const restricted of [
+      allowlist(),
+      allowlist(['member']),
+      allowlist([{ id: owner, canExecuteCommands: false }]),
+      { ...open([], false), open: {
+        defaultCanExecuteCommands: false,
+        commandPermissionOverrides: [{ id: owner, canExecuteCommands: false }],
+      } },
+    ]) {
+      current = policy(restricted, restricted);
+      for (const conversationType of ['direct', 'group']) {
+        for (const text of ['hello', '/status']) {
+          assert.deepEqual(evaluateInboundAccess(provider, { conversationType, senderIds: owner, text }),
+            { allowed: true, reason: 'privileged-sender' }, channel);
+          assert.equal(evaluateInboundAccess(provider, {
+            conversationType, senderIds: 'unrelated-user', text: '/status',
+          }).allowed, false, channel);
+        }
+      }
+    }
+  }
+});
+
+test('wildcard-only and another bot owner never become privileged identities', () => {
+  for (const [channel, config] of [
+    ['feishu', { ownerOpenIds: ['*'] }],
+    ['qq', { ownerUserOpenid: '*' }],
+    ['discord', {}],
+    ['feishu', { ownerOpenIds: ['ou_other_bot_owner'] }],
+  ]) {
+    const provider = accessPolicyProvider({ accessPolicyFor: () => policy(allowlist(), allowlist()) }, 'bot', {
+      channel, config,
+    });
+    for (const senderIds of ['*', 'ou_owner', 'group-member-openid']) {
+      assert.equal(evaluateInboundAccess(provider, {
+        conversationType: 'direct', senderIds, text: '/status',
+      }).reason, 'sender-not-allowed');
+    }
   }
 });
 

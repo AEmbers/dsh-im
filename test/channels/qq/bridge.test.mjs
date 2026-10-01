@@ -20,7 +20,7 @@ import {
 } from '../../../src/channels/shared/semantic/artifact.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
-  directAccessPolicy,
+  configuredAccessPolicy,
 } from '../access-policy-fixture.mjs';
 
 function deferred() {
@@ -546,9 +546,9 @@ test('QQ applies the unified access policy before attachments or Harness work', 
   let downloads = 0;
   const harnessCalls = [];
   const sent = [];
-  const accessPolicy = directAccessPolicy({
+  const accessPolicy = configuredAccessPolicy({
+    channel: 'qq', config: { ownerUserOpenid: 'owner-openid' },
     users: [{ id: 'member-openid', canExecuteCommands: false }],
-    privilegedIds: ['owner-openid'],
   });
   const bridge = new QqHarnessBridge({
     bot: {
@@ -607,6 +607,13 @@ test('QQ applies the unified access policy before attachments or Harness work', 
   accessPolicy.getSettings().direct.allowlist.users = [];
   await bridge.accept(directMessage('policy-owner-command', 'owner-openid', '/help'));
   assert.match(sent.at(-1), /\/help/);
+  const ownerReplies = sent.length;
+  await bridge.accept(message({
+    messageId: 'policy-unmapped-group-owner', senderId: 'different-member-openid', content: '/help',
+    rawEventType: 'GROUP_AT_MESSAGE_CREATE',
+    replyTarget: { scope: 'group', targetId: 'group-one', msgId: 'policy-unmapped-group-owner' },
+  }));
+  assert.equal(sent.length, ownerReplies, 'an unverified group identity does not inherit the private owner');
 });
 
 test('QQ rejects non-platform image URLs without fetching and returns a retryable image error', async () => {

@@ -21,7 +21,7 @@ import {
 } from '../../../src/channels/shared/semantic/artifact.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
-  directAccessPolicy,
+  configuredAccessPolicy,
 } from '../access-policy-fixture.mjs';
 
 function deferred() {
@@ -866,9 +866,9 @@ test('Weixin applies the unified access policy before attachments or Harness wor
   let imageExtractions = 0;
   const harnessCalls = [];
   const sent = [];
-  const accessPolicy = directAccessPolicy({
+  const accessPolicy = configuredAccessPolicy({
+    channel: 'weixin', config: { ownerUserId: 'owner-user' },
     users: [{ id: 'member-user', canExecuteCommands: false }],
-    privilegedIds: ['owner-user'],
   });
   const bridge = new WeixinHarnessBridge({
     api: {

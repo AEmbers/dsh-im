@@ -19,6 +19,7 @@ import {
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   directAccessPolicy,
+  configuredAccessPolicy,
 } from '../access-policy-fixture.mjs';
 
 const PNG_1X1 = Buffer.from(
@@ -1197,9 +1198,10 @@ test('Feishu applies the unified access policy before attachments or Harness wor
   let downloads = 0;
   const harnessCalls = [];
   const sent = [];
-  const accessPolicy = directAccessPolicy({
+  const accessLogs = [];
+  const accessPolicy = configuredAccessPolicy({
+    channel: 'feishu', config: { ownerOpenIds: ['*', 'ou_owner'] },
     users: [{ id: 'ou_member', canExecuteCommands: false }],
-    privilegedIds: ['ou_owner'],
   });
   const client = {
     im: { v1: {
@@ -1229,6 +1231,7 @@ test('Feishu applies the unified access policy before attachments or Harness wor
     },
     state: fixture.state,
     status: bridgeStatus(),
+    logger: { info: (...args) => accessLogs.push(args), warn() {}, error() {} },
   });
 
   await bridge.accept(event('policy-blocked-image', '', {
@@ -1240,6 +1243,12 @@ test('Feishu applies the unified access policy before attachments or Harness wor
   assert.equal(downloads, 0);
   assert.deepEqual(harnessCalls, []);
   assert.deepEqual(sent, []);
+
+  await bridge.accept(event('policy-blocked-image', 'private message replay', { senderOpenId: 'ou_blocked' }));
+  await bridge.waitForIdle();
+  assert.deepEqual(accessLogs, [['[dsh-feishu] inbound access denied', {
+    botId: 'configured_bot', conversationType: 'direct', reason: 'sender-not-allowed',
+  }]], 'replays do not repeat logs, and logs contain neither user identity nor message content');
 
   await bridge.accept(event('policy-member-text', '普通消息', {
     senderOpenId: 'ou_member',
@@ -1263,6 +1272,21 @@ test('Feishu applies the unified access policy before attachments or Harness wor
   }));
   await bridge.waitForIdle();
   assert.match(sent.at(-1), /\/status/);
+
+  await bridge.accept(event('policy-owner-group-command', '/help', {
+    senderOpenId: 'ou_owner', chat_type: 'group', chat_id: 'oc_owner_group',
+  }));
+  await bridge.waitForIdle();
+  assert.match(sent.at(-1), /\/status/);
+  const repliesBeforeBlockedGroup = sent.length;
+  await bridge.accept(event('policy-blocked-group', 'private group content', {
+    senderOpenId: 'ou_blocked', chat_type: 'group', chat_id: 'oc_owner_group',
+  }));
+  await bridge.waitForIdle();
+  assert.equal(sent.length, repliesBeforeBlockedGroup);
+  assert.deepEqual(accessLogs.at(-1)[1], {
+    botId: 'configured_bot', conversationType: 'group', reason: 'sender-not-allowed',
+  });
 });
 
 test('bridge hands a native Feishu file source to the current Harness turn', async () => {
@@ -5911,6 +5935,30 @@ test('a new menu receipt delivery error keeps the action completed', async () =>
   assert.equal(clearCalls, 1);
   assert.equal(patches.length, 2);
   assert.match(patches.at(-1).data.content, /已执行：新会话/);
+});
+
+test('confirmed Feishu owner can use menu cards with an empty allowlist while other actors stay blocked', async () => {
+  const fixture = stateFixture();
+  const sent = [];
+  const logs = [];
+  const bridge = new FeishuHarnessBridge({
+    client: cardClient(async (outgoing) => sent.push(outgoing)),
+    channel: {}, harness: sessionsHarness(3), state: fixture.state, status: bridgeStatus(),
+    accessPolicy: configuredAccessPolicy({ channel: 'feishu', config: { ownerOpenIds: ['ou_owner'] } }),
+    logger: { info: (...args) => logs.push(args), warn() {}, error() {} },
+  });
+  await bridge.accept(event('owner-menu', '/m', { senderOpenId: 'ou_owner' }));
+  await bridge.waitForIdle();
+  assert.equal(sent.length, 1);
+  await bridge.onCardAction(cardActionEvent('om_card_1', 'status', 'ou_blocked'));
+  await bridge.waitForIdle();
+  assert.equal(sent.length, 1);
+  assert.deepEqual(logs.at(-1), ['[dsh-feishu] inbound access denied', {
+    botId: 'configured_bot', conversationType: 'direct', reason: 'sender-not-allowed',
+  }]);
+  await bridge.onCardAction(cardActionEvent('om_card_1', 'status', 'ou_owner'));
+  await bridge.waitForIdle();
+  assert.equal(sent.length, 2, 'a confirmed owner can execute the card command');
 });
 
 test('card buttons honor the wildcard sender allowlist', async () => {

@@ -1,4 +1,5 @@
 import { getImageInputSettingsStore } from '../../../../src/channels/shared/image-input-settings-store.mjs';
+import { t } from '../../../../src/channels/shared/i18n.mjs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { unlink } from 'node:fs/promises';
@@ -291,6 +292,16 @@ export async function createProductionController(ctx, config = {}, internals = {
     stateFor: stateForBotId,
     agentPresetCatalog,
     modelCatalog,
+    validateAccessPolicyForBot(botId, policy) {
+      const botOpenId = configStore.getBot(botId)?.botOpenId;
+      if (!botOpenId) return;
+      if ([policy.direct, policy.group].some((scope) => scope.mode === 'allowlist'
+        && scope.allowlist.users.some((user) => user.id === botOpenId))) {
+        const error = new TypeError(t('这里需要填写用户的 Open ID，不能填写机器人自己的 Open ID。'));
+        error.code = 'access-policy-invalid';
+        throw error;
+      }
+    },
   });
 
   const supervisor = createSupervisor({

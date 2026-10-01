@@ -1,5 +1,7 @@
 // English translations (feishu area). Keys are exact Chinese literals passed to t().
 export default {
+  '这里需要填写用户的 Open ID，不能填写机器人自己的 Open ID。':
+    'Enter a user Open ID here, not the bot’s own Open ID.',
   '已结束本轮提问，将在当前会话中继续处理图片。':
     'The questions have been closed. Your image will be processed in this conversation.',
   '图片已排队，但暂时无法结束当前提问。请先回答问题或发送 /stop，结束后会继续处理图片。':

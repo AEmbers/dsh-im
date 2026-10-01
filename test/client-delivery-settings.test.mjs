@@ -536,7 +536,9 @@ test('access settings preserve independent mode drafts and save direct and group
     });
     assert.equal(accessHelpTooltip.props.role, 'tooltip');
     assert.equal(accessHelpButton.props['aria-describedby'], accessHelpTooltip.props.id);
-    assert.match(textOf(accessHelpTooltip), /原所有者或扫码接入者始终可以访问并执行命令/);
+    assert.match(textOf(accessHelpTooltip), /已由接入流程确认的所有者可以访问并执行命令/);
+    assert.match(textOf(accessHelpTooltip), /未识别到所有者身份时，按本页访问设置执行/);
+    assert.match(textOf(accessHelpTooltip), /不是机器人的 Open ID/);
   }
   assert.equal(accessHelpButtons(renderer.root.findByProps({ className: 'dim-accessActions' })).length, 0);
   assert.equal(accessHelpButtons(renderer.root.findByProps({ role: 'tablist' })).length, 0);
@@ -712,7 +714,7 @@ test('access settings keep a failed atomic save visible as an error', async (t) 
     rpcCall: async () => ({ ok: true, value: { targets: [] } }),
     accessRpcCall: async () => ({
       ok: false,
-      error: { code: 'access-policy-invalid', message: '访问策略未保存。' },
+      error: { code: 'access-policy-invalid', message: '这里需要填写用户的 Open ID，不能填写机器人自己的 Open ID。' },
     }),
     onBack() {},
   });
@@ -729,7 +731,7 @@ test('access settings keep a failed atomic save visible as an error', async (t) 
   });
 
   const feedback = renderer.root.findByProps({ className: 'dim-accessFeedback' });
-  assert.equal(textOf(feedback), '访问策略未保存。');
+  assert.equal(textOf(feedback), '这里需要填写用户的 Open ID，不能填写机器人自己的 Open ID。');
   assert.equal(feedback.props['data-tone'], 'error');
   assert.equal(feedback.props.role, 'alert');
 });

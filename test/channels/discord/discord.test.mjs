@@ -422,6 +422,7 @@ test('Discord controller persists a credential reference and exposes only masked
   const controller = new DiscordController({
     credentials: credentialStore,
     configStore,
+    inspectOwner: async () => '234567890123456789',
     inspectToken: async () => ({
       platformId: '1234567890123456789',
       name: 'Harness Discord',
