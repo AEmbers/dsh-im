@@ -276,8 +276,8 @@ export class OutboundArtifactRegistry {
   }
 
   /**
-   * Bind one channel request to the Turn it starts. This owns cleanup only:
-   * it never changes tool visibility or decides whether a file may be sent.
+   * Bind one channel delivery consumer to the Turn its request starts.
+   * Only this consumer can retain files for delivery after the Turn ends.
    */
   openConsumer(sessionId, promptRpcId) {
     if (typeof sessionId !== 'string' || !sessionId
@@ -310,8 +310,24 @@ export class OutboundArtifactRegistry {
     };
   }
 
-  /** Observe durable Session events solely to terminate unclaimed snapshots. */
-  observeSessionEvent(session, event) {
+  /** The Host claims input before assembling the first step's prompt. */
+  observeClaimedMessage(session, message, turn) {
+    const sessionId = sessionIdOf(session);
+    if (!sessionId || !Number.isInteger(turn) || turn < 0
+      || this.#currentTurn(session) !== turn) return;
+    this.#bindConsumer(sessionId, message?.source?.rpcId, turn);
+  }
+
+  #bindConsumer(sessionId, rpcId, turn) {
+    if (typeof rpcId !== 'string' || !rpcId) return;
+    const consumer = this.#consumersByPrompt.get(promptKey(sessionId, rpcId));
+    if (!consumer || consumer.released) return;
+    consumer.turn = turn;
+    this.#consumersByTurn.set(turnKey(sessionId, turn), consumer);
+  }
+
+  /** Observe durable Session events to bind delivery ownership and clean up. */
+  observeSessionEvent(session, event, { logger } = {}) {
     const sessionId = sessionIdOf(session);
     if (!sessionId || !event || typeof event !== 'object') return;
     if (event.type === 'turn/start') {
@@ -321,21 +337,50 @@ export class OutboundArtifactRegistry {
     }
     if (event.type === 'user/message') {
       const rpcId = event.data?.source?.rpcId;
-      const turn = this.#openTurns.get(sessionId) ?? currentTurn({ session });
+      const turn = this.#currentTurn(session);
       if (typeof rpcId !== 'string' || !rpcId || !Number.isInteger(turn)) return;
       this.#openTurns.set(sessionId, turn);
-      const consumer = this.#consumersByPrompt.get(promptKey(sessionId, rpcId));
-      if (!consumer || consumer.released) return;
-      consumer.turn = turn;
-      this.#consumersByTurn.set(turnKey(sessionId, turn), consumer);
+      this.#bindConsumer(sessionId, rpcId, turn);
       return;
     }
     if (event.type !== 'turn/end') return;
     const turn = event.data?.turn;
     if (!Number.isInteger(turn) || turn < 0) return;
-    if (this.#openTurns.get(sessionId) === turn) this.#openTurns.delete(sessionId);
+    // Retain the observed closed state so a stale Session snapshot cannot
+    // reopen a Turn while its consumer is still waiting to claim the files.
+    if (this.#currentTurn(session) === turn) this.#openTurns.set(sessionId, null);
+    if (!this.#consumerForTurn(sessionId, turn)) {
+      const keyForTurn = turnKey(sessionId, turn);
+      const artifactCount = (this.#turns.get(keyForTurn)?.size ?? 0)
+        + (this.#stagedTurns.get(keyForTurn)?.size ?? 0);
+      this.discard(sessionId, turn);
+      if (artifactCount > 0) {
+        logger?.warn?.('[dsh-im] discarded files without an active IM delivery consumer:', {
+          sessionId, turn, artifactCount,
+        });
+      }
+    }
+  }
+
+  #currentTurn(session) {
+    const sessionId = sessionIdOf(session);
+    return this.#openTurns.has(sessionId)
+      ? this.#openTurns.get(sessionId)
+      : currentTurn({ session });
+  }
+
+  #consumerForTurn(sessionId, turn) {
     const consumer = this.#consumersByTurn.get(turnKey(sessionId, turn));
-    if (!consumer || consumer.released) this.discard(sessionId, turn);
+    return consumer && !consumer.released && consumer.turn === turn
+      && this.#consumersByPrompt.get(promptKey(sessionId, consumer.promptRpcId)) === consumer
+      ? consumer : null;
+  }
+
+  /** Prompt guidance follows the active Turn's actual delivery owner. */
+  hasActiveConsumer(session) {
+    const turn = this.#currentTurn(session);
+    return Number.isInteger(turn)
+      && this.#consumerForTurn(sessionIdOf(session), turn) !== null;
   }
 
   /** A disposed Session cannot have another channel consumer claim its files. */
@@ -371,7 +416,7 @@ export class OutboundArtifactRegistry {
     const agent = exec?.agent;
     const sessionId = agent?.session?.header?.id;
     const workspace = agent?.session?.header?.cwd;
-    const turn = this.#openTurns.get(sessionId) ?? currentTurn(agent);
+    const turn = this.#currentTurn(agent?.session);
     if (typeof sessionId !== 'string' || !sessionId
       || typeof workspace !== 'string' || !workspace || turn === null) {
       throw artifactError(
@@ -380,8 +425,25 @@ export class OutboundArtifactRegistry {
       );
     }
 
+    const consumer = this.#consumerForTurn(sessionId, turn);
+    const unavailable = () => artifactError(
+      'artifact-consumer-required',
+      'No active IM delivery consumer owns this turn. The file was not queued. Use the host present tool if available to return the file in this conversation.',
+    );
+    if (!consumer) throw unavailable();
+
     const snapshot = await snapshotFile(workspace, requestedPath, exec?.signal);
     const { storagePath, ...snapshotMetadata } = snapshot;
+    // Copying and hashing yield to cancellation, disposal and Turn completion.
+    // Never leave a late snapshot behind after its delivery owner has gone.
+    try {
+      exec?.signal?.throwIfAborted();
+      if (this.#currentTurn(agent?.session) !== turn
+        || this.#consumerForTurn(sessionId, turn) !== consumer) throw unavailable();
+    } catch (error) {
+      await unlink(storagePath).catch(() => undefined);
+      throw error;
+    }
     const artifact = Object.freeze({
       kind: ARTIFACT_KIND,
       schemaVersion: 1,
@@ -578,7 +640,7 @@ export function createOutboundArtifactTool({ registry = outboundArtifactRegistry
   };
   const definition = Object.freeze({
     name: OUTBOUND_ARTIFACT_TOOL,
-    description: 'Register a readable file or generated image for delivery through the current conversation after this turn. Existing and newly created files are both valid. Success means queued, not sent; do not claim the user has received the file.',
+    description: 'Register a readable file or generated image for delivery through the current IM conversation after this turn. Requires an active IM delivery consumer; in Web, Desktop, or CLI conversations use the host present tool if available. Existing and newly created files are both valid. Success means queued, not sent; do not claim the user has received the file.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -643,20 +705,28 @@ export function createOutboundArtifactTool({ registry = outboundArtifactRegistry
   return Object.freeze({ definition, onResult });
 }
 
-/** Register the file-return tool without a per-request Gate. */
+/** Register the file-return tool with guidance scoped to an owned IM Turn. */
 export function installOutboundArtifactTool(ctx, { registry = outboundArtifactRegistry } = {}) {
   if (typeof ctx?.tools?.register !== 'function'
-    || typeof ctx?.systemPrompt?.section !== 'function'
+    || typeof ctx?.systemPrompt?.context !== 'function'
     || typeof ctx?.on !== 'function') return false;
+  const logger = typeof ctx.logger === 'function'
+    ? ctx.logger('dsh-im:outbound-artifact')
+    : (ctx.logger ?? console);
   const tool = createOutboundArtifactTool({ registry });
   ctx.tools.register(tool.definition);
   ctx.on('tools/result', tool.onResult);
-  ctx.on('session/event', (session, event) => registry.observeSessionEvent(session, event));
+  ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
+    registry.observeClaimedMessage(agent?.session, message, turn);
+  }, { global: true });
+  ctx.on('session/event', (session, event) => registry.observeSessionEvent(session, event, { logger }));
   ctx.on('session/disposed', (session) => registry.disposeSession(session));
-  ctx.systemPrompt.section({
+  ctx.systemPrompt.context({
     name: 'dsh-im:return-file',
     order: 115,
-    text: `When the user asks to receive a file or generated image, call ${OUTBOUND_ARTIFACT_TOOL} with its path. Existing files can be sent directly; do not recreate or rename a file solely for delivery. This tool only registers the file; the channel uploads and sends it after your turn finishes. In your reply say the file is prepared or queued, never that it has already been sent or received. The channel reports delivery failures separately.`,
+    text: (assembly) => registry.hasActiveConsumer(assembly?.agent?.session)
+      ? `When the user asks to receive a file or generated image, call ${OUTBOUND_ARTIFACT_TOOL} with its path. Existing files can be sent directly; do not recreate or rename a file solely for delivery. This tool only registers the file; the channel uploads and sends it after your turn finishes. In your reply say the file is prepared or queued, never that it has already been sent or received. The channel reports delivery failures separately.`
+      : '',
   });
   return true;
 }

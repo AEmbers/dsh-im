@@ -347,6 +347,10 @@ async function committedArtifact(t, fileName, content, suffix) {
       ],
     },
   };
+  t.after(registry.openConsumer(agent.session.header.id, rpcId));
+  for (const event of agent.session.events) {
+    registry.observeSessionEvent(agent.session, event);
+  }
   const tool = createOutboundArtifactTool({ registry });
   const exec = {
     name: OUTBOUND_ARTIFACT_TOOL,

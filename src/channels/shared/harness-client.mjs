@@ -1729,9 +1729,10 @@ export class HarnessClient {
       this.#registerInteractionOwnership(sessionId, ownership);
       this.#registerControlOwnership(ownership);
     }
-    // This is resource ownership, not a feature Gate: it lets the Host retain
-    // this Turn's snapshots until the channel has polled and claimed them.
-    const closeArtifactConsumer = outboundArtifactRegistry.openConsumer(sessionId, promptRpcId);
+    // Advertise delivery only when this request can actually claim its files.
+    const closeArtifactConsumer = typeof onArtifact === 'function'
+      ? outboundArtifactRegistry.openConsumer(sessionId, promptRpcId)
+      : null;
 
     try {
       const basePrompt = prompt;
@@ -1929,7 +1930,7 @@ export class HarnessClient {
           }
         }
       }
-      closeArtifactConsumer();
+      closeArtifactConsumer?.();
       if (ownership) {
         this.#unregisterControlOwnership(ownership);
         this.#unregisterInteractionOwnership(sessionId, ownership);

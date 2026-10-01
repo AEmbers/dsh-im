@@ -120,6 +120,10 @@ async function committedTelegramArtifact(t, {
       ],
     },
   };
+  t.after(registry.openConsumer(sessionId, `rpc-${suffix}`));
+  for (const event of agent.session.events) {
+    registry.observeSessionEvent(agent.session, event);
+  }
   await writeFile(join(workspace, fileName), content);
   const tool = createOutboundArtifactTool({ registry });
   const execution = {
