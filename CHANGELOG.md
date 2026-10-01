@@ -6,6 +6,29 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.34.1] - 2026-10-02
+
+### Fixed / 修复
+
+- Discord 通过已认证的应用信息确认个人应用所有者或团队所有者，并接入现有所有者访问豁免：已确认的所有者可在私聊和群聊中访问机器人、执行命令，不受普通用户白名单和命令开关限制。身份仅在正常启动、重连或凭据绑定时查询，成功保存后才用于运行时策略；查询失败保留已保存身份，不阻止机器人启动，也不会把团队其他成员或机器人自身视为所有者。（[#296](https://github.com/xmanrui/dsh-im/issues/296)）
+  Discord now resolves the personal application owner or team owner from authenticated application metadata and applies the existing owner exemption. Confirmed owners can access the bot and run commands in direct and group chats regardless of ordinary-user allowlists or command switches. Identity is queried only during normal startup, reconnect, or credential binding and applied only after persistence succeeds. Lookup failures retain the saved identity without blocking startup; other team members and the bot itself are not treated as owners. ([#296](https://github.com/xmanrui/dsh-im/issues/296))
+- 飞书保存访问策略时校验当前启用的私聊和群聊白名单，拒绝填入当前机器人自身的 Open ID，并返回中英文错误提示；校验失败不会写入或替换已有策略。开放模式下未启用的历史白名单保留，方便恢复访问。
+  Feishu rejects its own bot Open ID in active direct-message or group allowlists, with localized save errors. Validation failures leave the existing policy untouched. Inactive historical allowlists remain available when switching back to open mode to recover access.
+- 飞书被访问策略拒绝的消息、语音识别结果和卡片操作记录统一的拒绝原因日志，仅包含机器人标识、会话类型和原因，不记录用户身份或消息正文。
+  Feishu consistently logs access-policy refusals for messages, transcribed voice input, and card actions using only the bot identifier, conversation type, and reason, without user identities or message content.
+
+### Changed / 变更
+
+- 访问设置补充已确认所有者的权限说明、飞书用户 Open ID 填写提示及 QQ 私聊／群聊身份边界说明，并同步英文文案；新增跨渠道所有者与普通用户隔离回归，修复 Matrix 测试清理临时目录前未等待历史写入的问题。
+  Access settings clarify confirmed-owner privileges, Feishu user Open IDs, and QQ direct/group identity boundaries in Chinese and English. Added cross-channel owner/isolation regressions and fixed Matrix test cleanup to wait for pending room-history writes.
+
+### Notes / 使用说明
+
+- 所有者豁免仅适用于接入流程或平台认证确认的身份；飞书仅配置通配符时不会推断所有者，QQ 群聊必须匹配已确认身份，其他用户继续遵守原访问策略。Discord 升级后重启或重连即可尝试补齐身份，无需修改已有白名单；可选身份查询最长等待 5 秒，失败时不会自动放开访问。
+  Owner exemptions require identities confirmed during connection setup or by the platform. Wildcard-only Feishu configurations do not identify an owner, QQ groups require a matching confirmed identity, and other users remain subject to their existing access policy. Restart or reconnect Discord after upgrading to attempt owner discovery without changing allowlists. The optional lookup has a five-second timeout and does not open access on failure.
+- 依赖声明和 DSH `0.1.7-alpha.1` 兼容性声明保持不变；升级后重启 Host 并刷新管理页面。
+  Dependency declarations and declared DSH `0.1.7-alpha.1` compatibility remain unchanged. Restart the Host and refresh the management page after upgrading.
+
 ## [4.34.0] - 2026-10-01
 
 ### Added / 新增
@@ -1467,7 +1490,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.34.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.34.1...HEAD
+[4.34.1]: https://github.com/xmanrui/dsh-im/compare/v4.34.0...v4.34.1
 [4.34.0]: https://github.com/xmanrui/dsh-im/compare/v4.33.0...v4.34.0
 [4.33.0]: https://github.com/xmanrui/dsh-im/compare/v4.32.0...v4.33.0
 [4.32.0]: https://github.com/xmanrui/dsh-im/compare/v4.31.0...v4.32.0
