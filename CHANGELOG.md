@@ -6,6 +6,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.34.0] - 2026-10-01
+
 ### Added / 新增
 
 - 飞书和 QQ 新增 `/permission`、`/permissionlist`，可查看并通过序号或完整 ID 一步切换当前会话权限。序号绑定最近一次列表及会话，沿用 15 分钟快照；沙箱与审批联动由 Host 处理，运行中的任务也能响应。（[#280](https://github.com/xmanrui/dsh-im/issues/280)）
@@ -15,6 +17,13 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - Telegram 关闭思考过程留痕时，私聊复用群聊的占位消息编辑流程，避免 Rich Draft 在 Android 上占用发送入口；`/stop`、`/steer` 和普通追加消息沿用原有处理。最终答案保留在占位消息位置，富文本、长答案拆分和附件保持现有投递机制；最终编辑返回明确的“内容未变化”时视为已送达，避免重复发送或降级格式。（[#276](https://github.com/xmanrui/dsh-im/issues/276)）
   With thinking traces off, Telegram private chats now reuse the group's editable placeholder flow, avoiding Rich Drafts that block the Android composer. `/stop`, `/steer`, and ordinary follow-ups retain their existing handling. Final answers stay at the placeholder's position, with existing Rich formatting, long-answer splitting, and attachment delivery. Explicit unchanged-content responses during final edits count as delivered, preventing duplicate messages or unnecessary format fallback. ([#276](https://github.com/xmanrui/dsh-im/issues/276))
+
+### Notes / 使用说明
+
+- 权限命令仅支持纯文字且要求当前聊天已绑定会话，不会为查询自动创建会话，沿用现有命令访问控制。切换直接调用 Host 的权限命令；包括完全访问在内的档位可能改变审批要求，请仅在可信聊天中按需选择。列表序号过期或会话改变后需重新执行 `/permissionlist`，纯数字档位 ID 使用 `/permission id:<ID>`。Host 缺少相关接口或命令时会明确提示不支持。
+  Permission commands accept text only, require an already-bound Session, and retain existing command access controls; queries do not create Sessions. Switching invokes the Host's permission command directly. Presets, including full access, may change approval requirements, so select them deliberately in trusted chats. Refresh `/permissionlist` after its number mapping expires or the Session changes; use `/permission id:<ID>` for numeric IDs. Missing Host APIs or commands produce an explicit unsupported message.
+- Telegram 本次只调整关闭思考过程留痕时的展示方式，不改变 `/stop`、`/steer`、普通追加消息或附件的既有处理规则。依赖声明和 DSH `0.1.7-alpha.1` 兼容性声明保持不变；升级后重启 Host 并刷新管理页面。
+  The Telegram change affects presentation with thinking traces disabled, without changing existing handling of `/stop`, `/steer`, ordinary follow-ups, or attachments. Dependency declarations and declared DSH `0.1.7-alpha.1` compatibility remain unchanged. Restart the Host and refresh the management page after upgrading.
 
 ## [4.33.0] - 2026-10-01
 
@@ -1458,7 +1467,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.33.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.34.0...HEAD
+[4.34.0]: https://github.com/xmanrui/dsh-im/compare/v4.33.0...v4.34.0
 [4.33.0]: https://github.com/xmanrui/dsh-im/compare/v4.32.0...v4.33.0
 [4.32.0]: https://github.com/xmanrui/dsh-im/compare/v4.31.0...v4.32.0
 [4.31.0]: https://github.com/xmanrui/dsh-im/compare/v4.30.0...v4.31.0
