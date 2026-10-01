@@ -6,12 +6,21 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.33.0] - 2026-10-01
+
 ### Added / 新增
 
 - 同 Host 的公开 `dshIm` Service 新增版本化账号描述和条件纯文本发送：Feishu/Lark 账号由平台认证身份确定，目标以固定内容摘要校验，旧 `send` 行为保持兼容；未支持的渠道返回明确错误。感谢 [@DoodleBears](https://github.com/DoodleBears) 的代码、文档和测试贡献（[#293](https://github.com/xmanrui/dsh-im/pull/293)）。
   The same-Host public `dshIm` Service adds versioned account descriptions and checked plain-text sends. Feishu/Lark account identity is authenticated against the platform, destinations are checked against a frozen content digest, legacy `send` remains compatible, and unsupported channels return an explicit error. Thanks to [@DoodleBears](https://github.com/DoodleBears) for code, documentation and tests ([#293](https://github.com/xmanrui/dsh-im/pull/293)).
 
 ### Fixed / 修复
+
+- IM 文件回传现在要求当前回合存在实际接收文件的活跃 IM 消费者；提示词只在对应回合提供回传指引，Web、Desktop、CLI 等非 IM 回合误用工具时明确拒绝入队。回合结束、消费者释放或文件快照期间失去归属时清理文件，避免显示已排队却无人接收。感谢 [@luochen211](https://github.com/luochen211)（[#290](https://github.com/xmanrui/dsh-im/pull/290)，修复 [#286](https://github.com/xmanrui/dsh-im/issues/286)）。
+  IM file returns now require an active consumer that can receive files for the current turn. Prompt guidance is scoped to that turn, and tool calls from non-IM turns such as Web, Desktop, or CLI are explicitly refused rather than queued without a receiver. Files are cleaned up when ownership is lost, including during snapshot creation or turn completion. Thanks to [@luochen211](https://github.com/luochen211) ([#290](https://github.com/xmanrui/dsh-im/pull/290), fixes [#286](https://github.com/xmanrui/dsh-im/issues/286)).
+- 飞书菜单的「新会话」按钮显示处理中、已执行和失败状态，并阻止重复或过期回调再次清空后续会话；失败可重试，成功后按钮禁用，卡片更新失败时提示重新打开菜单。感谢 [@luochen211](https://github.com/luochen211)（[#291](https://github.com/xmanrui/dsh-im/pull/291)）。
+  Feishu's New session menu action shows processing, completed, and failed states, and prevents duplicate or stale callbacks from clearing a later session. Failures can be retried; successful actions disable the button, and failed card updates prompt the user to reopen the menu. Thanks to [@luochen211](https://github.com/luochen211) ([#291](https://github.com/xmanrui/dsh-im/pull/291)).
+- 已启用会话同步的 IM 私聊可接收绑定 Session 中 Host 定时任务成功完成后的最终助手文字，不再漏发结果；内部提醒提示不会作为用户消息回显。
+  IM direct chats with Session sync enabled now receive the final assistant text from successful Host-delivered scheduled turns in their bound Session. Internal reminder prompts are not echoed as user messages.
 
 - 飞书图片或文件资源整文件下载返回 `234037` 时，自动改用每次最多 8 MiB 的顺序 Range 请求，并校验响应范围、总大小和实际字节数。普通附件直接流式落盘；图片继续遵守现有大小限制，取消或失败时清理未完成的附件。（[#266](https://github.com/xmanrui/dsh-im/issues/266)） 感谢 [@luochen211](https://github.com/luochen211)（[#289](https://github.com/xmanrui/dsh-im/pull/289)）。
   Feishu image and file downloads now fall back to sequential Range requests of at most 8 MiB when the full download returns `234037`, validating ranges, total size, and actual byte counts. Ordinary attachments stream directly to disk; images retain their existing size limits, and cancelled or failed downloads clean up incomplete attachments. ([#266](https://github.com/xmanrui/dsh-im/issues/266)) Thanks to [@luochen211](https://github.com/luochen211) ([#289](https://github.com/xmanrui/dsh-im/pull/289)).
@@ -21,6 +30,18 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 - 修复 Host 语言设置在未注入的 Context 中读取时报错，以及新版 DSH 切换界面语言后 IM 回复和命令菜单未同步的问题。兼容新旧 settings API，渠道启动前等待语言初始化，settings 服务撤销时清理监听并回退到镜像语言。感谢 [@resetsix](https://github.com/resetsix)（[#288](https://github.com/xmanrui/dsh-im/pull/288)，修复 [#287](https://github.com/xmanrui/dsh-im/issues/287)）。
   Fixed Host language settings being read from a Context without injection, and IM replies and command menus not following interface-language changes in newer DSH versions. Supports both settings APIs, waits for language initialization before channels start, and cleans up observers and falls back to the mirrored language when the settings service is withdrawn. Thanks to [@resetsix](https://github.com/resetsix) ([#288](https://github.com/xmanrui/dsh-im/pull/288), fixes [#287](https://github.com/xmanrui/dsh-im/issues/287)).
+
+### Changed / 变更
+
+- npm 包元数据仅保留 `author`，贡献者致谢继续保留在 README 和更新日志中。
+  npm package metadata retains only `author`; contributor acknowledgements remain in the READMEs and changelog.
+
+### Notes / 使用说明
+
+- 新条件投递接口为可选的同 Host 插件能力，首版支持飞书/Lark，不改变已有 `send`、HTTP 或管理 RPC。调用方仍需持有用户授权；平台接受不代表送达，结果不确定时不要盲目重试。
+  Checked delivery is an optional same-Host plugin capability, initially supported by Feishu/Lark, without changes to existing `send`, HTTP, or management RPC. Callers still need user authorization; platform acceptance does not prove delivery, and uncertain outcomes must not be blindly retried.
+- 非 IM 会话应使用 Host 的展示能力返回文件（若提供）；定时任务文字同步需事先启用对应私聊的会话同步。升级后请重新打开飞书菜单，旧卡片的「新会话」回调不再执行。DSH 兼容性声明仍为 `0.1.7-alpha.1`。
+  Non-IM conversations should use the Host's presentation capability for file returns, when available. Scheduled text synchronization requires Session sync to be enabled for the direct chat. Reopen the Feishu menu after upgrading; New session callbacks from old cards no longer run. Declared DSH compatibility remains `0.1.7-alpha.1`.
 
 ## [4.32.0] - 2026-09-29
 
@@ -1427,7 +1448,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.32.0...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.33.0...HEAD
+[4.33.0]: https://github.com/xmanrui/dsh-im/compare/v4.32.0...v4.33.0
 [4.32.0]: https://github.com/xmanrui/dsh-im/compare/v4.31.0...v4.32.0
 [4.31.0]: https://github.com/xmanrui/dsh-im/compare/v4.30.0...v4.31.0
 [4.30.0]: https://github.com/xmanrui/dsh-im/compare/v4.29.1...v4.30.0
