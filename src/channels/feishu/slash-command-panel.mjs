@@ -49,6 +49,8 @@ export const SLASH_COMMAND_MANIFEST = Object.freeze([
   { command: 'reasoning', icon: 'ai-deepthink_outlined', default: '查看或切换推理等级', en_us: 'Show or switch the reasoning effort' },
   { command: 'presetlist', icon: 'skill_outlined', default: '列出可用 Agent 预设', en_us: 'List available Agent Presets' },
   { command: 'preset', icon: 'skill_outlined', default: '查看或切换 Agent 预设', en_us: 'Show or switch the Agent Preset' },
+  { command: 'permissionlist', icon: 'skill_outlined', default: '按序号列出权限档位', en_us: 'List numbered permission presets' },
+  { command: 'permission', icon: 'skill_outlined', default: '查看或切换当前会话权限', en_us: 'Show or switch current session permissions' },
   { command: 'stop', icon: 'clear_outlined', default: '停止当前任务', en_us: 'Stop the current task' },
   { command: 'steer', icon: 'promptword_outlined', default: '给当前任务补充指令', en_us: 'Send additional instructions to the current task' },
   { command: 'batch', icon: 'chat-ai_outlined', default: '开始批量输入（仅私聊）', en_us: 'Start batch input (private chats only)' },

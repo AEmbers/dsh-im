@@ -54,6 +54,7 @@ test('Feishu panel covers supported shared primary commands and its repair comma
   for (const entry of SHARED_COMMAND_CATALOG.filter((item) => item.enabled !== false && item.menuVisible !== false)) {
     assert.ok(byName.has(entry.name), `Supported /${entry.name} is missing from the Feishu panel`);
   }
+  for (const name of ['permission', 'permissionlist']) assert.ok(byName.has(name));
   for (const name of ['history', 'batch', 'send', 'cancel', 'repair']) {
     assert.match(byName.get(name)?.default ?? '', /仅私聊/);
     assert.match(byName.get(name)?.en_us ?? '', /private chats only/);
@@ -82,21 +83,21 @@ test('default registration adds missing commands to an old panel and preserves e
   const options = { appId: 'a', appSecret: 's', httpInstance: http };
   const first = await registerSlashCommands(options);
   assert.deepEqual(first.failed, []);
-  assert.equal(first.created.length, 17);
-  assert.equal(SLASH_COMMAND_MANIFEST.length, 31);
-  assert.equal(remoteItems.size, 32);
+  assert.equal(first.created.length, 19);
+  assert.equal(SLASH_COMMAND_MANIFEST.length, 33);
+  assert.equal(remoteItems.size, 34);
   assert.deepEqual(SLASH_COMMAND_MANIFEST.slice(0, originalCommands.length).map((entry) => entry.command), originalCommands);
   for (const { command } of SLASH_COMMAND_MANIFEST) assert.ok(remoteItems.has(command));
   for (const entry of initialItems) assert.deepEqual(remoteItems.get(entry.command), entry);
 
   const creationCount = () => requests.filter((request) => request.method === 'POST'
     && request.url.endsWith('/app_slash_commands')).length;
-  assert.equal(creationCount(), 17);
+  assert.equal(creationCount(), 19);
   const second = await registerSlashCommands(options);
   assert.deepEqual(second.failed, []);
   assert.deepEqual(second.created, []);
-  assert.equal(creationCount(), 17);
-  assert.equal(second.existing.length, 32);
+  assert.equal(creationCount(), 19);
+  assert.equal(second.existing.length, 34);
   for (const entry of initialItems) assert.deepEqual(remoteItems.get(entry.command), entry);
   assert.ok(requests.every((request) => ['GET', 'POST'].includes(request.method)));
 });

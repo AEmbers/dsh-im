@@ -1,3 +1,4 @@
+import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import {
@@ -298,6 +299,7 @@ function printableText(value) {
 }
 
 function isFeishuLocalCommand(text, { hasImages = false, hasFiles = false } = {}) {
+  if (isPermissionCommand(text)) return true;
   if (hasImages || hasFiles || typeof text !== 'string') return false;
   const command = text.trim();
   return MENU_COMMAND.test(command)
@@ -1234,6 +1236,7 @@ export class FeishuHarnessBridge {
       return processing;
     }
     const commandRunner = isHistoryCommand(commandText) ? runHistoryCommand
+      : isPermissionCommand(commandText) ? runPermissionCommand
       : hasInboundFiles(commandMessage) ? null : isControlCommand(commandText)
       ? runControlCommand
       : (isModelCommand(commandText)
@@ -1688,6 +1691,15 @@ export class FeishuHarnessBridge {
 
     if (commandText !== null && REPAIR_COMMAND_PREFIX.test(commandText)) {
       await this.#handleRepairCommand(event, commandText);
+      return;
+    }
+    if (isPermissionCommand(text)) {
+      const result = await runPermissionCommand(text, this.#harness, this.#state, key, {
+        signal: this.#signal, hasImages, hasFiles,
+      });
+      for (const reply of result.messages) {
+        await this.#send(event.message.chat_id, reply, { replyTo: event.message.message_id });
+      }
       return;
     }
     if (commandText === '/help') {

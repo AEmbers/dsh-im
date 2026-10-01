@@ -205,6 +205,8 @@ Shells can embed the complete IM management panel through the optional `dshImCli
 | `/preset` | Show this bot's Agent Preset setting for new Sessions. |
 | `/preset <number or Preset ID>` | Set this bot's Agent Preset; use `/preset id:<ID>` for a numeric ID. |
 | `/preset --default` | Clear this bot's explicit selection so later new Sessions follow the Host default. |
+| `/permissionlist` | Feishu and QQ: list numbered permission presets for the bound session. |
+| `/permission [number or full ID]` | Feishu and QQ: show or immediately switch the current session permissions; numeric IDs use `/permission id:<ID>`. |
 | `/stop` | Immediately stop this chat's running task while preserving work that has not started. |
 | `/steer <additional instruction>` | Inject an additional instruction into this chat's running task. |
 | `/batch` | Start batch input in a direct chat and collect up to 10 text messages. |

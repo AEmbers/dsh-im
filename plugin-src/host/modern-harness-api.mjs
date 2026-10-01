@@ -240,6 +240,9 @@ class ModernHarnessApi {
       models: (request, signal) => rpcResult(request, () => this.#sessionModels(
         request.payload.sessionId, signal,
       )),
+      permissions: (request, signal) => rpcResult(request, () => this.#sessionPermissions(
+        request.payload.sessionId, signal,
+      )),
       selectModel: (request, signal) => rpcResult(request, () => this.#invoke(
         'session', 'selectModel', { request: request.payload }, signal,
       )),
@@ -412,6 +415,25 @@ class ModernHarnessApi {
 
   #modelCatalog(signal) {
     return this.#invoke('session', 'modelCatalog', {}, signal);
+  }
+
+  async #sessionPermissions(sessionId, signal) {
+    const [catalog, projection] = await Promise.all([
+      this.#invoke('permissionPresets', 'catalog', {}, signal),
+      this.#invoke('session', 'projections', { request: { sessionId } }, signal),
+    ]);
+    if (projection === null) {
+      const error = new Error('Session not found');
+      error.failure = { code: 'session-not-found', message: error.message, details: {} };
+      throw error;
+    }
+    const currentValue = projection?.values?.permissions?.currentValue;
+    if (typeof currentValue !== 'string' || !Array.isArray(catalog?.options)) {
+      const error = new Error('Host permission presets are unavailable');
+      error.failure = { code: 'permissions-unavailable', message: error.message, details: {} };
+      throw error;
+    }
+    return { currentValue, options: catalog.options };
   }
 
   async #sessionModels(sessionId, signal) {

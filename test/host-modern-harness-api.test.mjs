@@ -14,6 +14,34 @@ function asyncValues(...values) {
   };
 }
 
+test('modern permission adapter reads structured live values without activating an agent', async () => {
+  const calls = [];
+  let currentValue = 'workspace-write';
+  const { ctx } = fakeContext({
+    stream() { throw new Error('Permission reads do not need a stream'); },
+    async invoke(request) {
+      calls.push(request);
+      if (request.namespace === 'permissionPresets' && request.method === 'catalog') {
+        assert.deepEqual(request.args, {});
+        return { options: [{ value: 'workspace-write' }, { value: 'auto' }] };
+      }
+      if (request.namespace === 'session' && request.method === 'projections') {
+        assert.deepEqual(request.args, { request: { sessionId: 'session' } });
+        return currentValue === null ? null : { values: { permissions: { currentValue } } };
+      }
+      throw new Error('Unexpected invocation');
+    },
+  });
+  const harness = new HarnessClient({ ...harnessConnection(ctx), workspace: '/workspace', autostart: false });
+  assert.equal((await harness.getSessionPermissions('session')).currentValue, 'workspace-write');
+  currentValue = 'auto';
+  assert.equal((await harness.getSessionPermissions('session')).currentValue, 'auto');
+  currentValue = null;
+  await assert.rejects(harness.getSessionPermissions('session'), (error) => error.code === 'session-not-found');
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every((call) => call.signal instanceof AbortSignal));
+});
+
 function fakeContext(gateway) {
   const listeners = new Map();
   const root = {};

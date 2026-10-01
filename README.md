@@ -207,6 +207,8 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 | `/preset` | 查看当前机器人的新会话 Agent Preset 设置。 |
 | `/preset <序号或 Preset ID>` | 设置当前机器人的 Agent Preset；纯数字 ID 使用 `/preset id:<ID>`。 |
 | `/preset --default` | 清除当前机器人的显式选择，让后续新 Session 跟随 Host 默认。 |
+| `/permissionlist` | 飞书、QQ：按序号列出当前绑定会话的可用权限档位。 |
+| `/permission [序号或完整ID]` | 飞书、QQ：查看或直接切换当前会话权限；纯数字 ID 使用 `/permission id:<ID>`。 |
 | `/stop` | 立即停止当前聊天正在运行的任务，并保留尚未开始的排队消息。 |
 | `/steer <补充指令>` | 把补充指令立即加入当前聊天正在运行的任务。 |
 | `/batch` | 在私聊中开启批量输入，最多收集 10 条纯文字消息。 |

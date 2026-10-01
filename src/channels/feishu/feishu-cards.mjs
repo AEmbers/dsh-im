@@ -535,6 +535,9 @@ export function menuHelpText() {
     '/preset [序号或完整ID]  查看或设置当前机器人 Agent Preset',
     '纯数字 ID：/preset id:<ID>',
     '/preset --default  跟随 Host 默认',
+    '/permissionlist  按序号列出权限档位',
+    '/permission [序号或完整ID]  查看或切换当前会话权限',
+    '纯数字 ID：/permission id:<ID>',
     '/models  列出模型',
     '/reasoninglist 或 /reasonings  按序号列出当前模型可用推理等级',
     '/reasoning [序号、等级ID或 --default]  查看或切换当前推理等级',
@@ -619,6 +622,8 @@ export function helpCard(extraTextLines = []) {
     { tag: 'hr' },
     { tag: 'div', text: markdown([
       t(HELP_TEXT_COMMANDS),
+      t('`/permissionlist` — 按序号列出权限档位'),
+      t('`/permission [序号/ID]` — 查看或切换当前会话权限'),
       t('/ws、/wsl、/workspaces  工作区命令别名'),
       t('`/version` — 查看插件版本'),
       t('/history [数量]  查看最近历史消息（默认 3 条，最多 5 条）'),

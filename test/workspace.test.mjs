@@ -469,6 +469,7 @@ test('an old workspace session handle cannot read history, list, select, stop, o
   const harness = {
     async readSessionHistory(...args) { targetCalls.push(['history', ...args]); },
     async getSessionModels(...args) { targetCalls.push(['models', ...args]); },
+    async getSessionPermissions(...args) { targetCalls.push(['permissions', ...args]); },
     async selectSessionModel(...args) { targetCalls.push(['select', ...args]); },
     async stopActiveTurn(...args) { targetCalls.push(['stop', ...args]); },
     async steerActiveTurn(...args) { targetCalls.push(['steer', ...args]); },
@@ -487,6 +488,7 @@ test('an old workspace session handle cannot read history, list, select, stop, o
   for (const operation of [
     () => oldSession.readHistory(),
     () => oldSession.models(),
+    () => oldSession.permissions(),
     () => oldSession.selectModel({ provider: 'provider', model: 'model' }),
     () => oldSession.stopActiveTurn(control),
     () => oldSession.steerActiveTurn('continue', control),

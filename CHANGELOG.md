@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Added / 新增
+
+- 飞书和 QQ 新增 `/permission`、`/permissionlist`，可查看并通过序号或完整 ID 一步切换当前会话权限。序号绑定最近一次列表及会话，沿用 15 分钟快照；沙箱与审批联动由 Host 处理，运行中的任务也能响应。（[#280](https://github.com/xmanrui/dsh-im/issues/280)）
+  Feishu and QQ add `/permission` and `/permissionlist` to view and switch current-session permissions by number or full ID in one step. Numbers retain the displayed list and session for 15 minutes; the Host applies sandbox and approval changes, including during a running turn. ([#280](https://github.com/xmanrui/dsh-im/issues/280))
+
 ### Fixed / 修复
 
 - Telegram 关闭思考过程留痕时，私聊复用群聊的占位消息编辑流程，避免 Rich Draft 在 Android 上占用发送入口；`/stop`、`/steer` 和普通追加消息沿用原有处理。最终答案保留在占位消息位置，富文本、长答案拆分和附件保持现有投递机制；最终编辑返回明确的“内容未变化”时视为已送达，避免重复发送或降级格式。（[#276](https://github.com/xmanrui/dsh-im/issues/276)）

@@ -1,3 +1,4 @@
+import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from '../shared/deferred-delivery-coordinator.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 import { runCompactCommand } from '../shared/compact-command.mjs';
@@ -115,6 +116,9 @@ function helpText() {
     t('/preset [序号或完整ID]  查看或设置当前机器人 Agent Preset'),
     t('纯数字 ID：/preset id:<ID>'),
     t('/preset --default  跟随 Host 默认'),
+    t('/permissionlist  按序号列出权限档位'),
+    t('/permission [序号或完整ID]  查看或切换当前会话权限'),
+    t('纯数字 ID：/permission id:<ID>'),
     t('/stop  停止当前任务'),
     t('/steer 补充指令  纠偏当前任务'),
     t('/batch  开始批量输入（仅私聊，最多 10 条文字）'),
@@ -523,7 +527,7 @@ export class QqHarnessBridge {
             text: commandText,
             hasImages: hasQqImageAttachments(message),
             hasFiles: hasQqFileAttachments(message),
-            ...(explicitMenu || numericMenu ? { isCommand: true } : {}),
+            ...(explicitMenu || numericMenu || isPermissionCommand(commandText) ? { isCommand: true } : {}),
           })
         : senderAllowed(message, this.#ownerUserOpenid)
           ? { allowed: true, reason: 'legacy-owner' }
@@ -594,6 +598,7 @@ export class QqHarnessBridge {
     const commandRunner = explicitMenu || numericMenu
       ? () => this.#runMenuCommand(message, menuInput, key)
       : isHistoryCommand(commandText) ? runHistoryCommand
+      : isPermissionCommand(commandText) ? runPermissionCommand
       : hasQqFileAttachments(message) ? null : isControlCommand(commandText)
       ? runControlCommand
       : (isModelCommand(commandText)

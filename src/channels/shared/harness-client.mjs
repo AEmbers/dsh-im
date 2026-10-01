@@ -1139,6 +1139,12 @@ export class HarnessClient {
     return validateModelCatalog(value, 'session.models', { session: true });
   }
 
+  async getSessionPermissions(sessionId, options = {}) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
+    await this.ensureRunning(options);
+    return this.rpc('session.permissions', { sessionId }, 30_000, options);
+  }
+
   async selectSessionModel(sessionId, selection, options = {}) {
     if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
     if (!validModelSelection(selection)) {

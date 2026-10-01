@@ -2002,6 +2002,11 @@ export function createBotWorkspaceScope(
             models(...args) {
               return invokeCurrentSession('getSessionModels', args, 'model listing');
             },
+            ...(typeof target.getSessionPermissions === 'function' ? {
+              permissions(...args) {
+                return invokeCurrentSession('getSessionPermissions', args, 'permission listing');
+              },
+            } : {}),
             readHistory(...args) {
               return invokeCurrentSession('readSessionHistory', args, 'history read');
             },
