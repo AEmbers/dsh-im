@@ -2945,35 +2945,28 @@ test('shared bridge never starts a keepalive timer for a non-keepalive stream', 
   assert.equal(typings.length, 1, 'only the initial typing indicator is sent');
 });
 
-test('Telegram question clears the draft after pending writes and keeps replies enabled until the final answer', async (t) => {
+test('Telegram questions remain answerable during a pending placeholder edit without Drafts', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const fixture = stateFixture();
-  const refreshGate = deferred();
+  const editGate = deferred();
   const answered = deferred();
   const drafts = [];
   const messages = [];
-  const finals = [];
+  const edits = [];
   let options;
-  let draftActive = false;
   const target = { chatId: 42, chatType: 'private' };
   const bot = new TelegramBotClient({
     api: {
       sendChatAction: async () => true,
-      sendRichMessageDraft: async (payload) => {
-        drafts.push(payload);
-        if (drafts.length === 2) await refreshGate.promise;
-        draftActive = true;
-        return true;
-      },
+      sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
       sendMessage: async (payload) => {
-        // Telegram clears a live draft when a regular message arrives.
-        draftActive = false;
         messages.push(payload);
-        return { message_id: 199 };
+        return { message_id: 198 + messages.length };
       },
-      sendRichMessage: async (payload) => {
-        finals.push(payload);
-        return { message_id: 200 };
+      editMessageText: async (payload) => {
+        edits.push(payload);
+        if (edits.length === 1) await editGate.promise;
+        return true;
       },
     },
   });
@@ -2989,16 +2982,16 @@ test('Telegram question clears the draft after pending writes and keeps replies 
       },
     },
   });
-  const processing = bridge.accept(message('draft-question', 'Choose a color', { replyTarget: target }));
+  const processing = bridge.accept(message('placeholder-question', 'Choose a color', { replyTarget: target }));
   t.after(async () => {
-    refreshGate.resolve();
+    editGate.resolve();
     answered.resolve();
     await processing;
   });
   await eventually(() => options !== undefined);
-  t.mock.timers.tick(4_000);
-  await eventually(() => drafts.length === 2);
-  const presentation = options.onInteraction(questionInteraction({
+  const pendingEdit = options.onUpdate({ type: 'text', text: 'Thinking about the choices' });
+  await eventually(() => edits.length === 1);
+  await options.onInteraction(questionInteraction({
     questions: [{ id: 'color', question: 'Choose a color', options: [{ label: 'Blue' }, { label: 'Green' }] }],
     respond: async (response) => {
       if (!response.ok) return { accepted: true };
@@ -3007,48 +3000,45 @@ test('Telegram question clears the draft after pending writes and keeps replies 
       return { accepted: true };
     },
   }));
-  const lateProgress = options.onUpdate({ type: 'tool', name: 'ask_user_question' });
-  await new Promise(setImmediate);
-  assert.equal(messages.length, 0, 'the question must wait for an in-flight draft to finish');
-  refreshGate.resolve();
-  await Promise.all([presentation, lateProgress]);
-  assert.equal(messages.length, 1);
-  assert.equal(draftActive, false, 'a late draft must not replace the question and block replies');
+  assert.equal(messages.length, 2, 'the question does not wait for an unrelated placeholder edit');
+  assert.equal(messages[0].text, '正在处理…');
+  assert.match(messages[1].text, /Choose a color/);
   t.mock.timers.tick(40_000);
-  await options.onUpdate({ type: 'text', text: 'Waiting for your choice' });
-  assert.equal(drafts.length, 2, 'neither heartbeat nor progress may restart the draft');
-  await bridge.accept(message('draft-answer', '2', { replyTarget: target }));
-  await processing;
-  assert.equal(finals.length, 1);
-  assert.equal(finals[0].richMessage.markdown, 'ISSUE199_DONE Green');
+  await new Promise(setImmediate);
+  assert.equal(drafts.length, 0, 'neither progress nor heartbeat creates a blocking Draft');
+  await bridge.accept(message('placeholder-answer', '2', { replyTarget: target }));
+  editGate.resolve();
+  await Promise.all([pendingEdit, processing]);
+  assert.equal(edits.length, 2);
+  assert.equal(edits[1].messageId, 199);
+  assert.equal(edits[1].richMessage.markdown, 'ISSUE199_DONE Green');
+  assert.equal(drafts.length, 0);
 });
 
-test('slow Telegram heartbeat does not queue redundant drafts ahead of the final answer', async (t) => {
+test('a slow heartbeat does not queue redundant refreshes after typing fails', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const fixture = stateFixture();
   const askGate = deferred();
   const refreshGate = deferred();
-  const drafts = [];
   const finals = [];
   let asked = false;
-  const bot = new TelegramBotClient({
-    api: {
-      // A failed typing request must not release the still-pending draft guard.
-      sendChatAction: async () => { throw new Error('typing unavailable'); },
-      sendRichMessageDraft: async (payload) => {
-        drafts.push(payload);
-        if (drafts.length === 2) await refreshGate.promise;
-        return true;
-      },
-      sendRichMessage: async (payload) => {
-        finals.push(payload);
-        return { message_id: 175 };
-      },
+  let refreshes = 0;
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'test', label: 'Test' },
+    bot: {
+      sendText: async () => 'done',
+      // A failed typing request must not release the pending refresh guard.
+      sendTyping: async () => { throw new Error('typing unavailable'); },
+      openDeliveryStream: async () => ({
+        keepalive: true,
+        update: async () => undefined,
+        refresh: async () => { refreshes += 1; await refreshGate.promise; },
+        finish: async (block) => {
+          finals.push(block);
+          return { deliveryOutcome: 'sent', providerMessageIds: ['175'] };
+        },
+      }),
     },
-    logger: { warn() {} },
-  });
-  const bridge = new TelegramHarnessBridge({
-    bot,
     harness: {
       createSession: async () => 'session-slow-heartbeat',
       ask: async () => { asked = true; return askGate.promise; },
@@ -3056,9 +3046,7 @@ test('slow Telegram heartbeat does not queue redundant drafts ahead of the final
     state: fixture.state,
     logger: { warn() {}, error() {} },
   });
-  const accepted = bridge.accept(message('slow-heartbeat', 'long task', {
-    replyTarget: { chatId: 42, chatType: 'private' },
-  }));
+  const accepted = bridge.accept(message('slow-heartbeat', 'long task'));
   t.after(async () => {
     refreshGate.resolve();
     askGate.resolve('final answer');
@@ -3066,20 +3054,18 @@ test('slow Telegram heartbeat does not queue redundant drafts ahead of the final
   });
   await eventually(() => asked);
   t.mock.timers.tick(4_000);
-  await eventually(() => drafts.length === 2);
+  await eventually(() => refreshes === 1);
   t.mock.timers.tick(40_000);
   await new Promise(setImmediate);
-  askGate.resolve('final answer');
-  await new Promise(setImmediate);
-  assert.equal(finals.length, 0, 'the final frame still waits for the in-flight draft');
+  assert.equal(refreshes, 1, 'ticks cannot queue another refresh while one is pending');
   refreshGate.resolve();
+  askGate.resolve('final answer');
   await accepted;
-  assert.equal(drafts.length, 2, 'only the initial draft and one heartbeat were sent');
   assert.equal(finals.length, 1);
-  assert.equal(finals[0].richMessage.markdown, 'final answer');
+  assert.equal(finals[0].text, 'final answer');
   t.mock.timers.tick(40_000);
   await new Promise(setImmediate);
-  assert.equal(drafts.length, 2, 'no heartbeat after final delivery');
+  assert.equal(refreshes, 1, 'no heartbeat after final delivery');
 });
 
 for (const outcome of ['success', 'failure']) {

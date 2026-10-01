@@ -2115,6 +2115,9 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
   const questionSent = deferred();
   const answerSubmitted = deferred();
   const releaseTurn = deferred();
+  const finalReplySent = deferred();
+  const drafts = [];
+  const edits = [];
   const sent = [];
   const acknowledgements = [];
   const keyboardEdits = [];
@@ -2163,6 +2166,12 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
       });
     },
     sendChatAction: async () => true,
+    sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
+    editMessageText: async (payload) => {
+      edits.push(payload);
+      if (payload.richMessage?.markdown === '已选择生产环境') finalReplySent.resolve();
+      return true;
+    },
     sendMessage: async ({ text, replyMarkup }) => {
       const messageId = nextOutboundMessageId;
       nextOutboundMessageId += 1;
@@ -2212,6 +2221,7 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
   const runtime = new TelegramRuntime({
     config: {
       botId: 'telegram_card',
+      thinkingTraces: false,
       platformId: '123456789',
       username: 'HarnessBot',
     },
@@ -2271,9 +2281,148 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
       }
     })(), 'the cursor did not advance past the press update');
     assert.equal(state.hasSeen('11'), true);
+    assert.equal(sent[0].text, '正在处理…');
+    releaseTurn.resolve();
+    await bounded(finalReplySent.promise, 'the placeholder was not finalized after the answer');
+    assert.equal(drafts.length, 0);
+    assert.equal(edits.length, 1);
+    assert.equal(edits[0].messageId, 900);
   } finally {
     releaseTurn.resolve();
     await runtime.stop();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('Telegram private placeholder streams keep controls responsive and ordinary follow-ups queued', async (t) => {
+  for (const action of ['stop', 'steer', 'follow-up']) {
+    await t.test(action, async () => {
+      const state = memoryState();
+      await state.setSession('direct:42:66', 'session-private-controls');
+      const started = deferred();
+      const release = deferred();
+      const asked = [];
+      const controls = [];
+      const sent = [];
+      const edits = [];
+      const drafts = [];
+      let promptControl;
+      let running = false;
+      const session = {
+        sessionExists: async () => true,
+        ask: async (text, options) => {
+          asked.push(text);
+          if (asked.length > 1) return 'follow-up answer';
+          promptControl = options.control;
+          running = true;
+          await options.onUpdate({ type: 'text', text: 'partial answer' });
+          started.resolve();
+          try {
+            await release.promise;
+            return 'final answer';
+          } finally {
+            running = false;
+          }
+        },
+        stopActiveTurn: async (control) => {
+          controls.push({ control });
+          assert.equal(running, true);
+          const error = new Error('stopped');
+          error.code = 'turn-stopped';
+          release.reject(error);
+          return true;
+        },
+        steerActiveTurn: async (text, control) => {
+          controls.push({ text, control });
+          assert.equal(running, true);
+          return true;
+        },
+      };
+      const client = new TelegramBotClient({
+        api: {
+          sendChatAction: async () => true,
+          setMessageReaction: async () => true,
+          sendMessage: async (payload) => { sent.push(payload); return { message_id: 900 + sent.length }; },
+          editMessageText: async (payload) => { edits.push(payload); return true; },
+          sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
+        },
+        logger: { warn() {} },
+      });
+      const bridge = new TelegramHarnessBridge({
+        bot: client, state, thinkingTraces: false,
+        harness: { workspaceSession: () => session },
+        logger: { warn() {}, error() {} },
+      });
+      const incoming = (id, text) => normalizeTelegramUpdate({
+        update_id: id,
+        message: { message_id: id, message_thread_id: 66,
+          chat: { id: 42, type: 'private' }, from: { id: 42 }, text },
+      }, { botId: '123456789' });
+      const prompt = bridge.accept(incoming(100, 'long task'));
+      let followUp;
+      try {
+        await bounded(started.promise, 'the original prompt did not start');
+        assert.equal(drafts.length, 0, 'the running turn must never block the composer with a Draft');
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].messageThreadId, 66);
+        assert.equal(edits[0].messageId, 901);
+        if (action === 'follow-up') {
+          followUp = bridge.accept(incoming(101, 'ordinary follow-up'));
+          await new Promise((resolve) => setImmediate(resolve));
+          assert.deepEqual(asked, ['long task']);
+          assert.equal(running, true);
+          release.resolve();
+          await bounded(Promise.all([prompt, followUp]), 'queued follow-up did not complete');
+          assert.deepEqual(asked, ['long task', 'ordinary follow-up']);
+          assert.equal(controls.length, 0);
+          assert.equal(sent.length, 2, 'one placeholder for each prompt');
+          assert.deepEqual(edits.map((entry) => entry.messageId), [901, 901, 902]);
+        } else {
+          await bounded(bridge.accept(incoming(101, action === 'stop' ? '/stop' : '/steer add ANDROID_OK')),
+            'control command waited for the ordinary prompt queue');
+          assert.deepEqual(controls[0].control, promptControl);
+          assert.deepEqual(asked, ['long task']);
+          if (action === 'steer') {
+            assert.equal(controls[0].text, 'add ANDROID_OK');
+            assert.equal(running, true);
+            release.resolve();
+          }
+          await bounded(prompt, 'the original prompt did not settle');
+          assert.ok(sent.some(({ text }) => text.includes(action === 'stop' ? '已请求停止当前任务' : '已提交补充指令')));
+          assert.equal(edits.at(-1).messageId, 901);
+          assert.equal(edits.at(-1).text ?? edits.at(-1).richMessage?.markdown,
+            action === 'stop' ? '已停止。' : 'final answer');
+        }
+        assert.equal(drafts.length, 0);
+      } finally {
+        release.resolve();
+        await Promise.allSettled([prompt, followUp]);
+      }
+    });
+  }
+});
+
+test('Telegram private placeholder creation failure still delivers the final answer once', async () => {
+  const calls = [];
+  let asks = 0;
+  const client = new TelegramBotClient({
+    api: {
+      sendChatAction: async () => true,
+      sendMessage: async () => { calls.push('placeholder'); throw new Error('placeholder unavailable'); },
+      sendRichMessage: async () => { calls.push('final'); return { message_id: 901 }; },
+      sendRichMessageDraft: async () => { calls.push('draft'); return true; },
+    },
+  });
+  const bridge = new TelegramHarnessBridge({
+    bot: client, state: memoryState(), thinkingTraces: false,
+    harness: { createSession: async () => 'session-fallback', ask: async () => { asks += 1; return 'final'; } },
+    logger: { warn() {}, error() {} },
+  });
+  const receipt = await bridge.accept(normalizeTelegramUpdate({
+    update_id: 100,
+    message: { message_id: 100, chat: { id: 42, type: 'private' }, from: { id: 42 }, text: 'hello' },
+  }, { botId: '123456789' }));
+  assert.equal(asks, 1);
+  assert.deepEqual(calls, ['placeholder', 'final']);
+  assert.equal(receipt.deliveryOutcome, 'sent');
 });

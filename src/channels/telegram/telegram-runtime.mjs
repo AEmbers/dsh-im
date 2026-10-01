@@ -1,5 +1,4 @@
 import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionStage } from '../shared/connection-error.mjs';
-import { randomInt } from 'node:crypto';
 
 import { createEditableMessageStream } from '../shared/editable-message-stream.mjs';
 import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
@@ -357,6 +356,11 @@ function telegramMessageId(value) {
   return Number.isSafeInteger(value?.message_id) ? String(value.message_id) : null;
 }
 
+function telegramMessageUnchanged(error) {
+  return error?.providerCode === 400
+    && /^(?:Bad Request: )?message is not modified(?::|$)/iu.test(error?.message ?? '');
+}
+
 function telegramFailure(error) {
   const providerCode = Number(error?.providerCode);
   const status = Number(error?.status);
@@ -687,6 +691,9 @@ export class TelegramBotClient {
           messageId: placeholderMessageId,
           text: chunks[0],
           signal: this.#signal,
+        }).catch((error) => {
+          // The final answer may already be visible from the last progress edit.
+          if (!telegramMessageUnchanged(error)) throw error;
         });
         firstUnsent = 1;
       } catch (error) {
@@ -814,6 +821,8 @@ export class TelegramBotClient {
         messageId,
         richMessage: { markdown: chunks[0].markdown },
         signal: this.#signal,
+      }).catch((error) => {
+        if (!telegramMessageUnchanged(error)) throw error;
       });
     } catch (error) {
       const failure = telegramFailure(error);
@@ -869,31 +878,8 @@ export class TelegramBotClient {
   }
 
   async openDeliveryStream(target) {
-    if (target.chatType === 'private') {
-      const draftId = randomInt(1, 2_147_483_647);
-      const updateDraft = async (block) => {
-        const richMessage = { markdown: toTelegramRichMarkdown(block.text) };
-        await this.#api.sendRichMessageDraft({
-          chatId: target.chatId,
-          draftId,
-          richMessage,
-          messageThreadId: target.messageThreadId,
-          signal: this.#signal,
-        });
-        return deliveryResult('telegram-rich-draft', []);
-      };
-      const stream = new TelegramDeliveryStream({
-        update: updateDraft,
-        finish: (block) => this.#sendRich(target, block),
-        fail: (block) => this.#sendPlain(target, block.text),
-        presentation: 'telegram-rich-draft',
-        keepalive: true,
-        logger: this.#logger,
-      });
-      await stream.update(createTextDeliveryBlock(t('正在处理…'), 'plain'));
-      return stream;
-    }
-
+    // Real messages keep the Android composer available for /stop and /steer;
+    // private-chat Rich Drafts can block sending for the whole turn (#276).
     const placeholder = await this.#api.sendMessage({
       chatId: target.chatId,
       text: t('正在处理…'),

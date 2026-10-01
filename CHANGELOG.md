@@ -13,6 +13,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Fixed / 修复
 
+- Telegram 关闭思考过程留痕时，私聊复用群聊的占位消息编辑流程，避免 Rich Draft 在 Android 上占用发送入口；`/stop`、`/steer` 和普通追加消息沿用原有处理。最终答案保留在占位消息位置，富文本、长答案拆分和附件保持现有投递机制；最终编辑返回明确的“内容未变化”时视为已送达，避免重复发送或降级格式。（[#276](https://github.com/xmanrui/dsh-im/issues/276)）
+  With thinking traces off, Telegram private chats now reuse the group's editable placeholder flow, avoiding Rich Drafts that block the Android composer. `/stop`, `/steer`, and ordinary follow-ups retain their existing handling. Final answers stay at the placeholder's position, with existing Rich formatting, long-answer splitting, and attachment delivery. Explicit unchanged-content responses during final edits count as delivered, preventing duplicate messages or unnecessary format fallback. ([#276](https://github.com/xmanrui/dsh-im/issues/276))
+
 - 飞书图片或文件资源整文件下载返回 `234037` 时，自动改用每次最多 8 MiB 的顺序 Range 请求，并校验响应范围、总大小和实际字节数。普通附件直接流式落盘；图片继续遵守现有大小限制，取消或失败时清理未完成的附件。（[#266](https://github.com/xmanrui/dsh-im/issues/266)） 感谢 [@luochen211](https://github.com/luochen211)（[#289](https://github.com/xmanrui/dsh-im/pull/289)）。
   Feishu image and file downloads now fall back to sequential Range requests of at most 8 MiB when the full download returns `234037`, validating ranges, total size, and actual byte counts. Ordinary attachments stream directly to disk; images retain their existing size limits, and cancelled or failed downloads clean up incomplete attachments. ([#266](https://github.com/xmanrui/dsh-im/issues/266)) Thanks to [@luochen211](https://github.com/luochen211) ([#289](https://github.com/xmanrui/dsh-im/pull/289)).
 

@@ -203,7 +203,7 @@ test('Telegram API uses the documented Rich Message, Draft, and rich edit fields
   }), /non-zero integer/);
 });
 
-test('Telegram sends no Chinese in English mode, on the Draft and placeholder paths', async (t) => {
+test('Telegram sends no Chinese in English mode, in private and group streams', async (t) => {
   const previous = getImHostLanguage();
   t.after(() => setImHostLanguage(previous));
   setImHostLanguage('en');
@@ -223,16 +223,14 @@ test('Telegram sends no Chinese in English mode, on the Draft and placeholder pa
         return { message_id: 802 };
       },
       editMessageText: async (payload) => {
-        outbound.push(payload.text);
+        outbound.push(payload.text ?? payload.richMessage?.markdown);
         return true;
       },
     },
     logger: { warn() {} },
   });
 
-  // The private path opens a Rich Draft; the group path sends a plain
-  // placeholder. Both emit the "working on it" text before any model output,
-  // which is the first thing a reader ever sees from the bot.
+  // Both paths start with a translated placeholder before any model output.
   const privateStream = await client.openDeliveryStream({ chatId: 42, chatType: 'private' });
   await privateStream.finish({ kind: 'text', text: '# done', format: 'markdown' });
   const groupStream = await client.openDeliveryStream({ chatId: 43, chatType: 'group' });
@@ -282,130 +280,97 @@ test('the Telegram placeholder follows a language switch in both directions, per
   ], 'every message must use the language in force when it was sent');
 });
 
-test('Telegram private stream reuses one non-zero Draft id and persists one Rich final', async () => {
-  const drafts = [];
-  const finals = [];
-  const plain = [];
-  const client = new TelegramBotClient({
-    api: {
-      sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
-      sendRichMessage: async (payload) => {
-        finals.push(payload);
-        return { message_id: 801 };
-      },
-      sendMessage: async (payload) => { plain.push(payload); return { message_id: 802 }; },
-    },
-    logger: { warn() {} },
-  });
-  const target = {
-    chatId: 42,
-    chatType: 'private',
-    replyToMessageId: 44,
-    messageThreadId: 66,
-  };
+test('Telegram private, group and Topic streams edit one placeholder without Drafts', async (t) => {
+  for (const target of [
+    { chatId: 42, chatType: 'private', replyToMessageId: 44 },
+    { chatId: 42, chatType: 'private', replyToMessageId: 44, messageThreadId: 66 },
+    { chatId: -100123, chatType: 'group', replyToMessageId: 44 },
+    { chatId: -100123, chatType: 'supergroup', replyToMessageId: 44, messageThreadId: 55 },
+  ]) {
+    await t.test(`${target.chatType} / topic ${target.messageThreadId ?? 'none'}`, async () => {
+      const created = [];
+      const edited = [];
+      const drafts = [];
+      const richSends = [];
+      const client = new TelegramBotClient({
+        api: {
+          sendMessage: async (payload) => { created.push(payload); return { message_id: 901 }; },
+          editMessageText: async (payload) => { edited.push(payload); return { message_id: 901 }; },
+          sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
+          sendRichMessage: async (payload) => { richSends.push(payload); return { message_id: 902 }; },
+        },
+      });
 
-  const stream = await client.openDeliveryStream(target);
-  const draftResult = await stream.update({
-    kind: 'text', text: '## partial', format: 'markdown',
-  });
-  const result = await stream.finish({ kind: 'text', text: '## final', format: 'markdown' });
+      const stream = await client.openDeliveryStream(target);
+      await stream.update({ kind: 'text', text: '正在使用工具…', format: 'plain' });
+      const progress = { kind: 'text', text: '## partial', format: 'markdown' };
+      await stream.update(progress);
+      await stream.update(progress);
+      assert.equal(stream.keepalive, false);
+      await stream.refresh();
+      assert.equal(edited.length, 2, 'identical progress and heartbeat do not edit again');
+      const result = await stream.finish({ kind: 'text', text: '## final', format: 'markdown' });
+      await stream.refresh();
+      await stream.update({ kind: 'text', text: 'late progress', format: 'plain' });
 
-  assert.equal(drafts.length, 2);
-  assert.ok(Number.isSafeInteger(drafts[0].draftId) && drafts[0].draftId !== 0);
-  assert.equal(drafts[1].draftId, drafts[0].draftId);
-  assert.deepEqual(drafts.map((draft) => draft.messageThreadId), [66, 66]);
-  assert.equal(finals.length, 1);
-  assert.equal(finals[0].replyToMessageId, 44);
-  assert.equal(finals[0].messageThreadId, 66);
-  assert.deepEqual(finals[0].richMessage, { markdown: '## final' });
-  assert.equal(plain.length, 0);
-  assert.deepEqual(draftResult, {
-    presentation: 'telegram-rich-draft',
-    providerMessageIds: [],
-    deliveryOutcome: 'sent',
-  });
-  assert.deepEqual(result, {
-    presentation: 'telegram-rich-final',
-    providerMessageIds: ['801'],
-    deliveryOutcome: 'sent',
-  });
+      assert.equal(created.length, 1);
+      assert.equal(created[0].chatId, target.chatId);
+      assert.equal(created[0].replyToMessageId, target.replyToMessageId);
+      assert.equal(created[0].messageThreadId, target.messageThreadId);
+      assert.equal(created[0].text, '正在处理…');
+      assert.equal(drafts.length, 0);
+      assert.equal(richSends.length, 0);
+      assert.equal(edited.length, 3);
+      assert.equal(edited[0].text, '正在使用工具…');
+      assert.deepEqual(edited[1].richMessage, { markdown: '## partial' });
+      assert.deepEqual(edited[2].richMessage, { markdown: '## final' });
+      assert.ok(edited.every((call) => call.messageId === 901 && call.chatId === target.chatId));
+      assert.deepEqual(result, {
+        presentation: 'telegram-rich-final',
+        providerMessageIds: ['901'],
+        deliveryOutcome: 'sent',
+      });
+    });
+  }
 });
 
-test('Telegram group and Topic stream keeps one placeholder and finalizes it in place', async () => {
-  const created = [];
-  const edited = [];
-  const drafts = [];
-  const richSends = [];
-  const client = new TelegramBotClient({
-    api: {
-      sendMessage: async (payload) => { created.push(payload); return { message_id: 901 }; },
-      editMessageText: async (payload) => { edited.push(payload); return { message_id: 901 }; },
-      sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
-      sendRichMessage: async (payload) => { richSends.push(payload); return { message_id: 902 }; },
-    },
-  });
-  const target = {
-    chatId: -100123,
-    chatType: 'supergroup',
-    replyToMessageId: 44,
-    messageThreadId: 55,
-  };
+test('Telegram long Rich final records the placeholder and every remainder message id', async (t) => {
+  for (const chatType of ['private', 'supergroup']) {
+    await t.test(chatType, async () => {
+      const edits = [];
+      const remainders = [];
+      const client = new TelegramBotClient({
+        api: {
+          sendMessage: async () => ({ message_id: 951 }),
+          editMessageText: async (payload) => {
+            edits.push(payload);
+            return { message_id: 951 };
+          },
+          sendRichMessage: async (payload) => {
+            remainders.push(payload);
+            return { message_id: 952 + remainders.length };
+          },
+        },
+      });
+      const stream = await client.openDeliveryStream({
+        chatId: chatType === 'private' ? 42 : -100123,
+        chatType,
+        replyToMessageId: 44,
+        messageThreadId: 55,
+      });
+      const answer = `## long\n\n${'中'.repeat(31_000)} 😀`;
+      const result = await stream.finish({ kind: 'text', text: answer, format: 'markdown' });
 
-  const stream = await client.openDeliveryStream(target);
-  await stream.update({ kind: 'text', text: '正在使用工具…', format: 'plain' });
-  await stream.update({ kind: 'text', text: '## partial', format: 'markdown' });
-  const result = await stream.finish({ kind: 'text', text: '## final', format: 'markdown' });
-
-  assert.equal(created.length, 1);
-  assert.equal(created[0].replyToMessageId, 44);
-  assert.equal(created[0].messageThreadId, 55);
-  assert.equal(drafts.length, 0);
-  assert.equal(richSends.length, 0);
-  assert.equal(edited.length, 3);
-  assert.equal(edited[0].text, '正在使用工具…');
-  assert.deepEqual(edited[1].richMessage, { markdown: '## partial' });
-  assert.deepEqual(edited[2].richMessage, { markdown: '## final' });
-  assert.ok(edited.every((call) => call.messageId === 901));
-  assert.deepEqual(result, {
-    presentation: 'telegram-rich-final',
-    providerMessageIds: ['901'],
-    deliveryOutcome: 'sent',
-  });
-});
-
-test('Telegram long Rich final records the placeholder and every remainder message id', async () => {
-  const edits = [];
-  const remainders = [];
-  const client = new TelegramBotClient({
-    api: {
-      sendMessage: async () => ({ message_id: 951 }),
-      editMessageText: async (payload) => {
-        edits.push(payload);
-        return { message_id: 951 };
-      },
-      sendRichMessage: async (payload) => {
-        remainders.push(payload);
-        return { message_id: 952 + remainders.length };
-      },
-    },
-  });
-  const stream = await client.openDeliveryStream({
-    chatId: -100123,
-    chatType: 'supergroup',
-    replyToMessageId: 44,
-    messageThreadId: 55,
-  });
-  const answer = `## long\n\n${'中'.repeat(31_000)} 😀`;
-  const result = await stream.finish({ kind: 'text', text: answer, format: 'markdown' });
-
-  assert.equal(edits.length, 1);
-  assert.ok(remainders.length >= 1);
-  assert.ok(remainders.every((call) => call.messageThreadId === 55));
-  assert.deepEqual(result.providerMessageIds, [
-    '951',
-    ...remainders.map((_, index) => String(953 + index)),
-  ]);
-  assert.equal(result.deliveryOutcome, 'sent');
+      assert.equal(edits.length, 1);
+      assert.ok(remainders.length >= 1);
+      assert.ok(remainders.every((call) => call.messageThreadId === 55));
+      assert.deepEqual(result.providerMessageIds, [
+        '951',
+        ...remainders.map((_, index) => String(953 + index)),
+      ]);
+      assert.equal(result.deliveryOutcome, 'sent');
+    });
+  }
 });
 
 test('Telegram final delivery degrades a definite Rich rejection directly to plain text', async () => {
@@ -459,100 +424,108 @@ test('Telegram conversion failure skips Rich and keeps the exact source in plain
   assert.equal(result.presentation, 'text-fallback');
 });
 
-test('Telegram group fallback edits the same placeholder and never sends a second final', async () => {
-  const edits = [];
-  let sends = 0;
-  const client = new TelegramBotClient({
-    api: {
-      sendMessage: async () => { sends += 1; return { message_id: 1101 }; },
-      editMessageText: async (payload) => {
-        edits.push(payload);
-        if (payload.richMessage) throw rejected(400);
-        return { message_id: 1101 };
-      },
-      sendRichMessage: async () => assert.fail('short final must stay on the placeholder'),
-    },
-  });
-  const stream = await client.openDeliveryStream({
-    chatId: -100123,
-    chatType: 'supergroup',
-    replyToMessageId: 44,
-    messageThreadId: 55,
-  });
-  const result = await stream.finish({ kind: 'text', text: '# final', format: 'markdown' });
+test('Telegram fallback edits the same placeholder and never sends a second final', async (t) => {
+  for (const chatType of ['private', 'supergroup']) {
+    await t.test(chatType, async () => {
+      const edits = [];
+      let sends = 0;
+      const client = new TelegramBotClient({
+        api: {
+          sendMessage: async () => { sends += 1; return { message_id: 1101 }; },
+          editMessageText: async (payload) => {
+            edits.push(payload);
+            if (payload.richMessage) throw rejected(400);
+            return { message_id: 1101 };
+          },
+          sendRichMessage: async () => assert.fail('short final must stay on the placeholder'),
+        },
+      });
+      const stream = await client.openDeliveryStream({
+        chatId: chatType === 'private' ? 42 : -100123,
+        chatType,
+        replyToMessageId: 44,
+        messageThreadId: 55,
+      });
+      const result = await stream.finish({ kind: 'text', text: '# final', format: 'markdown' });
 
-  assert.equal(sends, 1);
-  assert.equal(edits.length, 2);
-  assert.ok(edits.every((edit) => edit.messageId === 1101));
-  assert.deepEqual(edits.map((edit) => (edit.richMessage ? 'rich' : 'plain')), ['rich', 'plain']);
-  assert.equal(result.presentation, 'text-fallback');
-  assert.equal(result.deliveryOutcome, 'sent');
-  assert.deepEqual(result.providerMessageIds, ['1101']);
+      assert.equal(sends, 1);
+      assert.equal(edits.length, 2);
+      assert.ok(edits.every((edit) => edit.messageId === 1101));
+      assert.deepEqual(edits.map((edit) => (edit.richMessage ? 'rich' : 'plain')), ['rich', 'plain']);
+      assert.equal(result.presentation, 'text-fallback');
+      assert.equal(result.deliveryOutcome, 'sent');
+      assert.deepEqual(result.providerMessageIds, ['1101']);
+    });
+  }
 });
 
-test('Telegram replaces a rejected placeholder or records every failed terminalization attempt', async () => {
-  const sends = [];
-  const edits = [];
-  const client = new TelegramBotClient({
-    api: {
-      sendMessage: async (payload) => {
-        sends.push(payload);
-        return { message_id: sends.length === 1 ? 1111 : 1112 };
-      },
-      editMessageText: async (payload) => {
-        edits.push(payload);
-        if (payload.richMessage || payload.text === '# final') throw rejected(400);
-        return { message_id: 1111 };
-      },
-    },
-    logger: { warn() {} },
-  });
-  const stream = await client.openDeliveryStream({
-    chatId: -100123,
-    chatType: 'supergroup',
-    replyToMessageId: 44,
-    messageThreadId: 55,
-  });
-  const result = await stream.finish({ kind: 'text', text: '# final', format: 'markdown' });
+test('Telegram replaces a rejected placeholder or records every failed terminalization attempt', async (t) => {
+  for (const chatType of ['private', 'supergroup']) {
+    await t.test(chatType, async () => {
+      const sends = [];
+      const edits = [];
+      const client = new TelegramBotClient({
+        api: {
+          sendMessage: async (payload) => {
+            sends.push(payload);
+            return { message_id: sends.length === 1 ? 1111 : 1112 };
+          },
+          editMessageText: async (payload) => {
+            edits.push(payload);
+            if (payload.richMessage || payload.text === '# final') throw rejected(400);
+            return { message_id: 1111 };
+          },
+        },
+        logger: { warn() {} },
+      });
+      const stream = await client.openDeliveryStream({
+        chatId: chatType === 'private' ? 42 : -100123,
+        chatType,
+        replyToMessageId: 44,
+        messageThreadId: 55,
+      });
+      const result = await stream.finish({ kind: 'text', text: '# final', format: 'markdown' });
 
-  assert.deepEqual(sends.map((call) => call.text), ['正在处理…', '# final']);
-  assert.deepEqual(edits.map((call) => (
-    call.richMessage ? 'rich' : call.text
-  )), ['rich', '# final', '回复已发送。']);
-  assert.deepEqual(result.providerMessageIds, ['1111', '1112']);
-  assert.equal(result.deliveryOutcome, 'sent');
+      assert.deepEqual(sends.map((call) => call.text), ['正在处理…', '# final']);
+      assert.deepEqual(edits.map((call) => (
+        call.richMessage ? 'rich' : call.text
+      )), ['rich', '# final', '回复已发送。']);
+      assert.deepEqual(result.providerMessageIds, ['1111', '1112']);
+      assert.equal(result.deliveryOutcome, 'sent');
 
-  const failedEdits = [];
-  let failedSends = 0;
-  const failedClient = new TelegramBotClient({
-    api: {
-      sendMessage: async (payload) => {
-        failedSends += 1;
-        if (failedSends === 1) return { message_id: 1121 };
-        throw rejected(403);
-      },
-      editMessageText: async (payload) => {
-        failedEdits.push(payload);
-        throw rejected(403);
-      },
-    },
-    logger: { warn() {} },
-  });
-  const failedStream = await failedClient.openDeliveryStream({
-    chatId: -100123,
-    chatType: 'supergroup',
-    messageThreadId: 55,
-  });
-  const failedResult = await failedStream.finish({
-    kind: 'text', text: '# final', format: 'markdown',
-  });
+      const failedEdits = [];
+      let failedSends = 0;
+      const failedClient = new TelegramBotClient({
+        api: {
+          sendMessage: async (payload) => {
+            failedSends += 1;
+            if (failedSends === 1) return { message_id: 1121 };
+            throw rejected(403);
+          },
+          editMessageText: async (payload) => {
+            failedEdits.push(payload);
+            throw rejected(403);
+          },
+        },
+        logger: { warn() {} },
+      });
+      const failedStream = await failedClient.openDeliveryStream({
+        chatId: chatType === 'private' ? 42 : -100123,
+        chatType,
+        messageThreadId: 55,
+      });
+      const failedResult = await failedStream.finish({
+        kind: 'text', text: '# final', format: 'markdown',
+      });
 
-  assert.equal(failedSends, 2);
-  assert.deepEqual(failedEdits.map((call) => (
-    call.richMessage ? 'rich' : call.text
-  )), ['rich', '# final', '消息发送失败，请稍后重试。']);
-  assert.equal(failedResult.deliveryOutcome, 'failed');
-  assert.deepEqual(failedResult.providerMessageIds, ['1121']);
+      assert.equal(failedSends, 2);
+      assert.deepEqual(failedEdits.map((call) => (
+        call.richMessage ? 'rich' : call.text
+      )), ['rich', '# final', '消息发送失败，请稍后重试。']);
+      assert.equal(failedResult.deliveryOutcome, 'failed');
+      assert.deepEqual(failedResult.providerMessageIds, ['1121']);
+    });
+  }
 });
 
 test('Telegram uncertain final delivery records unknown and never sends a fallback copy', async () => {
@@ -987,184 +960,176 @@ test('Telegram stop runs one Prompt and replaces the group placeholder with one 
   assert.ok(edits.every((call) => !call.richMessage));
 });
 
-test('Telegram group processing failure replaces its placeholder instead of leaving it stuck', async () => {
-  const sent = [];
-  const edits = [];
-  let prompts = 0;
-  const client = new TelegramBotClient({
-    api: {
-      sendChatAction: async () => true,
-      sendMessage: async (payload) => { sent.push(payload); return { message_id: 1401 }; },
-      editMessageText: async (payload) => { edits.push(payload); return { message_id: 1401 }; },
-    },
-  });
-  const bridge = new TelegramHarnessBridge({
-    bot: client,
-    state: memoryState(),
-    logger: { warn() {}, error() {} },
-    harness: {
-      createSession: async () => 'session-rich-error',
-      ask: async () => {
-        prompts += 1;
-        throw new Error('private Harness diagnostic');
-      },
-    },
-  });
+test('Telegram processing failure replaces its placeholder instead of leaving it stuck', async (t) => {
+  for (const chatType of ['private', 'supergroup']) {
+    await t.test(chatType, async () => {
+      const sent = [];
+      const edits = [];
+      let prompts = 0;
+      const client = new TelegramBotClient({
+        api: {
+          sendChatAction: async () => true,
+          sendMessage: async (payload) => { sent.push(payload); return { message_id: 1401 }; },
+          editMessageText: async (payload) => { edits.push(payload); return { message_id: 1401 }; },
+        },
+      });
+      const bridge = new TelegramHarnessBridge({
+        bot: client,
+        state: memoryState(),
+        logger: { warn() {}, error() {} },
+        harness: {
+          createSession: async () => 'session-rich-error',
+          ask: async () => {
+            prompts += 1;
+            throw new Error('private Harness diagnostic');
+          },
+        },
+      });
 
-  await bridge.accept({
-    messageId: 'rich-error-inbound',
-    senderId: 'rich-user',
-    kind: 'group',
-    conversationId: '-100123:55',
-    content: 'fail safely',
-    addressed: true,
-    replyTarget: {
-      chatId: -100123,
-      chatType: 'supergroup',
-      replyToMessageId: 44,
-      messageThreadId: 55,
-    },
-  });
+      await bridge.accept({
+        messageId: 'rich-error-inbound',
+        senderId: 'rich-user',
+        kind: chatType === 'private' ? 'direct' : 'group',
+        conversationId: chatType === 'private' ? '42:55' : '-100123:55',
+        content: 'fail safely',
+        addressed: true,
+        replyTarget: {
+          chatId: chatType === 'private' ? 42 : -100123,
+          chatType,
+          replyToMessageId: 44,
+          messageThreadId: 55,
+        },
+      });
 
-  assert.equal(prompts, 1);
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].text, '正在处理…');
-  assert.equal(edits.length, 1);
-  assert.equal(edits[0].messageId, 1401);
-  assert.match(edits[0].text, /任务未完成，暂时无法确定原因/);
-  assert.match(edits[0].text, /错误码：INTERNAL_UNKNOWN；参考号：MF-[A-F0-9]{8}/);
-  assert.equal(Object.hasOwn(edits[0], 'richMessage'), false);
+      assert.equal(prompts, 1);
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0].text, '正在处理…');
+      assert.equal(edits.length, 1);
+      assert.equal(edits[0].messageId, 1401);
+      assert.match(edits[0].text, /任务未完成，暂时无法确定原因/);
+      assert.match(edits[0].text, /错误码：INTERNAL_UNKNOWN；参考号：MF-[A-F0-9]{8}/);
+      assert.equal(Object.hasOwn(edits[0], 'richMessage'), false);
+    });
+  }
 });
 
-test('Telegram private Draft refresh re-sends the last frame for keepalive', async () => {
-  const drafts = [];
-  const finals = [];
-  const client = new TelegramBotClient({
-    api: {
-      sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
-      sendRichMessage: async (payload) => { finals.push(payload); return { message_id: 811 }; },
-    },
-    logger: { warn() {} },
-  });
-  const stream = await client.openDeliveryStream({
-    chatId: 42,
-    chatType: 'private',
-    replyToMessageId: 44,
-    messageThreadId: 66,
-  });
-
-  assert.equal(stream.keepalive, true, 'the private Draft carrier asks for keepalive');
-  await stream.update({ kind: 'text', text: '## partial', format: 'markdown' });
-  const before = drafts.length;
-  const refreshResult = await stream.refresh();
-  assert.deepEqual(refreshResult, {
-    presentation: 'telegram-rich-draft',
-    providerMessageIds: [],
-    deliveryOutcome: 'sent',
-  }, 'refresh resolves with the draft delivery result');
-  assert.equal(drafts.length, before + 1, 'refresh re-sends the draft');
-  assert.equal(drafts[before].draftId, drafts[before - 1].draftId, 'refresh keeps the same Draft id');
-  assert.deepEqual(drafts[before].richMessage, { markdown: '## partial' }, 'refresh re-sends the latest frame');
-
-  await stream.finish({ kind: 'text', text: '## final', format: 'markdown' });
-  assert.equal(finals.length, 1);
-});
-
-test('Telegram Draft refresh is a no-op after the stream is finished', async () => {
-  const drafts = [];
-  const client = new TelegramBotClient({
-    api: {
-      sendRichMessageDraft: async (payload) => { drafts.push(payload); return true; },
-      sendRichMessage: async () => ({ message_id: 821 }),
-    },
-    logger: { warn() {} },
-  });
-  const stream = await client.openDeliveryStream({
-    chatId: 42,
-    chatType: 'private',
-    replyToMessageId: 44,
-  });
-
-  await stream.update({ kind: 'text', text: 'partial', format: 'plain' });
-  await stream.finish({ kind: 'text', text: 'final', format: 'plain' });
-  const settled = drafts.length;
-  await stream.refresh();
-  assert.equal(drafts.length, settled, 'refresh after finish never re-sends');
-});
-
-test('Telegram group placeholder stream does not refresh (real message needs no keepalive)', async () => {
-  const created = [];
-  const edited = [];
-  const client = new TelegramBotClient({
-    api: {
-      sendMessage: async () => { created.push('created'); return { message_id: 901 }; },
-      editMessageText: async (payload) => { edited.push(payload); return { message_id: 901 }; },
-      sendRichMessage: async () => ({ message_id: 902 }),
-    },
-    logger: { warn() {} },
-  });
-  const stream = await client.openDeliveryStream({
-    chatId: -100123,
-    chatType: 'supergroup',
-    replyToMessageId: 44,
-    messageThreadId: 55,
-  });
-
-  assert.equal(stream.keepalive, false, 'the group placeholder carrier does not ask for keepalive');
-  await stream.update({ kind: 'text', text: '## partial', format: 'markdown' });
-  const editsBefore = edited.length;
-  await stream.refresh();
-  assert.equal(edited.length, editsBefore, 'refresh does not edit the placeholder again');
-  await stream.finish({ kind: 'text', text: '## final', format: 'markdown' });
-  assert.equal(edited.length, editsBefore + 1, 'only the final frame edits the placeholder');
-});
-
-test('Telegram keepalive refresh serializes ahead of finish so the final frame lands last', async () => {
+test('Telegram pending edit serializes ahead of finish so the final frame lands last', { timeout: 1_000 }, async (t) => {
   const order = [];
-  let draftCalls = 0;
-  let releaseRefreshGate;
-  const refreshGate = new Promise((resolve) => { releaseRefreshGate = resolve; });
+  const editStarted = Promise.withResolvers();
+  const releaseEdit = Promise.withResolvers();
+  t.after(() => releaseEdit.resolve());
   const client = new TelegramBotClient({
     api: {
-      sendRichMessageDraft: async (payload) => {
-        draftCalls += 1;
-        order.push(`draft:${payload.richMessage.markdown}`);
-        // The third Draft call is the keepalive refresh re-sending the latest
-        // frame; hold it in flight to prove finish() queues behind it.
-        if (draftCalls === 3) await refreshGate;
-      },
-      sendRichMessage: async (payload) => {
-        order.push(`final:${payload.richMessage.markdown}`);
+      sendMessage: async () => ({ message_id: 831 }),
+      editMessageText: async (payload) => {
+        const text = payload.richMessage.markdown;
+        order.push(`start:${text}`);
+        if (text === 'partial') {
+          editStarted.resolve();
+          await releaseEdit.promise;
+        }
+        order.push(`done:${text}`);
         return { message_id: 831 };
       },
     },
     logger: { warn() {} },
   });
-  const stream = await client.openDeliveryStream({
-    chatId: 42,
-    chatType: 'private',
-    replyToMessageId: 44,
-  });
-
-  // 正在处理… (openDeliveryStream) -> partial (update).
-  await stream.update({ kind: 'text', text: 'partial', format: 'markdown' });
-  assert.deepEqual(order, ['draft:正在处理…', 'draft:partial']);
-  // The heartbeat fires refresh() while its draft request is still in flight.
-  const refreshing = stream.refresh();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(order, ['draft:正在处理…', 'draft:partial', 'draft:partial'],
-    'the keepalive refresh re-sent the latest frame and is now in flight');
-  // finish() is called while the refresh is still pending; it must queue behind it.
+  const stream = await client.openDeliveryStream({ chatId: 42, chatType: 'private' });
+  const updating = stream.update({ kind: 'text', text: 'partial', format: 'markdown' });
+  await editStarted.promise;
   const finishing = stream.finish({ kind: 'text', text: 'final', format: 'markdown' });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(order, ['draft:正在处理…', 'draft:partial', 'draft:partial'],
-    'finish waits for the in-flight refresh');
-  releaseRefreshGate();
-  await Promise.all([refreshing, finishing]);
-  assert.deepEqual(order, [
-    'draft:正在处理…',
-    'draft:partial',
-    'draft:partial',
-    'final:final',
-  ], 'the final frame is the last write');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ['start:partial'], 'finish waits for the pending edit');
+  releaseEdit.resolve();
+  await Promise.all([updating, finishing]);
+  await stream.update({ kind: 'text', text: 'late', format: 'markdown' });
+  assert.deepEqual(order, ['start:partial', 'done:partial', 'start:final', 'done:final']);
+});
+
+test('Telegram unchanged final edits succeed without losing format or remaining chunks', async (t) => {
+  for (const chatType of ['private', 'supergroup']) {
+    for (const format of ['markdown', 'plain']) {
+      for (const long of [false, true]) {
+        await t.test(`${chatType} / ${format} / ${long ? 'long' : 'short'}`, async () => {
+          const calls = [];
+          let lastText;
+          const api = new TelegramApi({
+            token: TOKEN,
+            fetchImpl: async (url, options) => {
+              const method = url.pathname.split('/').at(-1);
+              const body = JSON.parse(options.body);
+              calls.push({ method, body });
+              if (method === 'editMessageText') {
+                const text = body.rich_message?.markdown ?? body.text;
+                if (text === lastText) {
+                  return jsonResponse({ ok: false, error_code: 400,
+                    description: 'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+                  }, 400);
+                }
+                lastText = text;
+              }
+              return jsonResponse({ ok: true, result: { message_id: 900 + calls.length } });
+            },
+          });
+          const client = new TelegramBotClient({ api });
+          const stream = await client.openDeliveryStream({
+            chatId: chatType === 'private' ? 42 : -100123, chatType, replyToMessageId: 44, messageThreadId: 66,
+          });
+          const answer = long ? '中'.repeat(format === 'markdown' ? 31_000 : 4_100) : 'final answer';
+          const chunks = format === 'markdown'
+            ? splitTelegramRichMarkdown(answer).map((part) => part.markdown)
+            : splitTelegramRegularText(answer);
+          await stream.update({ kind: 'text', text: chunks[0], format });
+          const result = await stream.finish({ kind: 'text', text: answer, format });
+
+          assert.equal(result.deliveryOutcome, 'sent');
+          assert.equal(result.presentation, format === 'markdown' ? 'telegram-rich-final' : 'text-fallback');
+          assert.deepEqual(calls.map(({ method }) => method), [
+            'sendMessage', 'editMessageText', 'editMessageText',
+            ...chunks.slice(1).map(() => format === 'markdown' ? 'sendRichMessage' : 'sendMessage'),
+          ]);
+          assert.deepEqual(result.providerMessageIds, ['901', ...chunks.slice(1).map((_, i) => String(904 + i))]);
+          const final = calls[2].body;
+          assert.equal(final.message_id, 901);
+          assert.equal(final.rich_message?.markdown ?? final.text, chunks[0]);
+          assert.equal(Boolean(final.rich_message), format === 'markdown');
+          assert.ok(calls.slice(3).every(({ body }) => body.message_thread_id === 66));
+        });
+      }
+    }
+  }
+});
+
+test('Telegram only treats the explicit unchanged-content rejection as success', async (t) => {
+  for (const failure of [
+    { code: 400, description: 'Bad Request: message to edit not found' },
+    { code: 400, description: 'Bad Request: message is not modified because editing is forbidden' },
+    { code: 429, description: 'Bad Request: message is not modified' },
+    { code: 500, description: 'Bad Request: message is not modified' },
+  ]) {
+    await t.test(`${failure.code} / ${failure.description}`, async () => {
+      const calls = [];
+      const api = new TelegramApi({
+        token: TOKEN,
+        fetchImpl: async (url, options) => {
+          const method = url.pathname.split('/').at(-1);
+          const body = JSON.parse(options.body);
+          calls.push({ method, body });
+          if (method === 'editMessageText' && body.rich_message) {
+            return jsonResponse({ ok: false, error_code: failure.code,
+              description: failure.description }, failure.code);
+          }
+          return jsonResponse({ ok: true, result: { message_id: 901 } });
+        },
+      });
+      const stream = await new TelegramBotClient({ api }).openDeliveryStream({ chatId: 42, chatType: 'private' });
+      const result = await stream.finish({ kind: 'text', text: '# final', format: 'markdown' });
+      assert.equal(result.deliveryOutcome, failure.code === 500 ? 'unknown' : 'sent');
+      assert.equal(calls.length, failure.code === 500 ? 2 : 3);
+      if (failure.code !== 500) {
+        assert.equal(result.presentation, 'text-fallback');
+        assert.equal(calls[2].body.text, '# final');
+      }
+    });
+  }
 });
