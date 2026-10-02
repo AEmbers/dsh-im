@@ -30,6 +30,7 @@ import {
 import {
   accessPolicyProvider,
   initialAccessPolicyFor,
+  newBotAccessPolicyFor,
 } from '../shared/access-policy-production.mjs';
 
 function pluginPaths(config) {
@@ -117,7 +118,7 @@ export async function createProductionController(ctx, config = {}, internals = {
       const state = await stateFor(botId);
       await workspaces.ensure(botId, {
         defaultAgentPreset: config.agentPreset,
-        initialAccessPolicy: initialAccessPolicyFor('qq', botConfig),
+        initialAccessPolicy: newBotAccessPolicyFor('qq', botConfig),
       });
       const workspaceScope = createBotWorkspaceScope(harness, {
         botId, workspaces, state, agentPresetCatalog,

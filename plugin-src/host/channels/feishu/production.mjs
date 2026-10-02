@@ -35,6 +35,7 @@ import { createDeliveryAdapter } from '../../delivery-adapter.mjs';
 import {
   accessPolicyProvider,
   initialAccessPolicyFor,
+  newBotAccessPolicyFor,
 } from '../shared/access-policy-production.mjs';
 
 // The WebSocket agent built here is only used for the Feishu long connection,
@@ -230,7 +231,7 @@ export async function createProductionController(ctx, config = {}, internals = {
       const id = botId ?? botConfig.id ?? botConfig.appId;
       await workspaces.ensure(id, {
         defaultAgentPreset: config.agentPreset,
-        initialAccessPolicy: initialAccessPolicyFor('feishu', botConfig),
+        initialAccessPolicy: newBotAccessPolicyFor('feishu', botConfig),
       });
       const workspaceScope = createBotWorkspaceScope(harness, {
         botId: id, workspaces, state, agentPresetCatalog,

@@ -5,6 +5,7 @@ import { evaluateInboundAccess } from '../src/channels/shared/inbound-access.mjs
 import {
   accessPolicyProvider,
   initialAccessPolicyFor,
+  newBotAccessPolicyFor,
   privilegedSenderIdsFor,
 } from '../plugin-src/host/channels/shared/access-policy-production.mjs';
 import {
@@ -76,6 +77,17 @@ test('Host initialization preserves the nine channel access baselines and legacy
   assert.deepEqual(initialAccessPolicyFor('whatsapp', {
     accessMode: 'open', allowedNumbers: ['16505550999'],
   }), policy(open(['16505550999@s.whatsapp.net']), open()));
+});
+
+test('new Feishu and QQ bots open messages and commands for QR and manual binding', () => {
+  assert.deepEqual(newBotAccessPolicyFor('feishu', { ownerOpenIds: ['ou_owner'] }), policy());
+  assert.deepEqual(newBotAccessPolicyFor('qq', { ownerUserOpenid: 'qq-owner' }), policy());
+  assert.deepEqual(newBotAccessPolicyFor('feishu', { ownerOpenIds: ['*'] }), policy());
+  assert.deepEqual(newBotAccessPolicyFor('qq', { ownerUserOpenid: '*' }), policy());
+  for (const channel of ['weixin', 'dingtalk', 'wecom', 'wecom-app', 'slack', 'telegram',
+    'discord', 'whatsapp', 'imessage', 'matrix']) {
+    assert.deepEqual(newBotAccessPolicyFor(channel), initialAccessPolicyFor(channel), channel);
+  }
 });
 
 test('Host-only owner identities are not copied into public access-policy rows', () => {
