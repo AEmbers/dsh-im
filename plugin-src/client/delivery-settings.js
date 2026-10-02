@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { AccessPolicySettingsPage } from './access-policy-settings.js';
+import { BotSettingsTabs } from './bot-settings-tabs.js';
 import { FeishuGroupSettingsPage } from './channels/feishu/group-settings.js';
 import { FeishuVoiceSettingsPage } from './channels/feishu/voice-settings.js';
 import { FeishuSlashPanelSettingsPage } from './channels/feishu/slash-panel-settings.js';
@@ -770,22 +771,7 @@ export function DeliveryTargetSettingsPage({
   },
   h('header', { className: 'dim-deliveryHeader' },
     h(DeliveryButton, { className: 'dim-deliveryBack', onClick: onBack }, '← 返回机器人列表')),
-  h('div', { className: 'dim-botSettingsTabsBar' },
-    h('nav', {
-      className: 'dim-botSettingsTabs',
-      role: 'tablist',
-      'aria-label': '机器人设置页签',
-    }, settingsTabs.map((tab) => h('button', {
-      key: tab.id,
-      id: `dim-bot-settings-${tab.id}-tab`,
-      type: 'button',
-      role: 'tab',
-      className: 'dim-botSettingsTab',
-      'aria-selected': tab.id === activeTab.id,
-      'aria-controls': `dim-bot-settings-${tab.id}-panel`,
-      tabIndex: tab.id === activeTab.id ? 0 : -1,
-      onClick: () => setActiveTabId(tab.id),
-    }, tab.label)))),
+  h(BotSettingsTabs, { tabs: settingsTabs, activeTabId: activeTab.id, onChange: setActiveTabId }),
   h('div', {
     id: activePanelId,
     className: 'dim-botSettingsTabPanel',

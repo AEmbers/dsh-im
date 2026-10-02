@@ -467,9 +467,14 @@ const CSS = String.raw`
 .dim-moreSettingsChevron { width: 6px; height: 6px; margin-right: 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
 .dim-deliveryPage { min-width: 0; display: grid; }
 .dim-deliveryHeader { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.dim-botSettingsTabsBar { min-width: 0; margin-top: 10px; border-bottom: 1px solid var(--dsw-alias-border-l2, #dfe1e5); }
-.dim-botSettingsTabs { min-width: 0; display: flex; align-items: flex-end; gap: 24px; overflow-x: auto; scrollbar-width: none; }
+.dim-botSettingsTabsBar { min-width: 0; display: flex; align-items: center; gap: 4px; margin-top: 10px; border-bottom: 1px solid var(--dsw-alias-border-l2, #dfe1e5); }
+.dim-botSettingsTabs { min-width: 0; flex: 1; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .dim-botSettingsTabs::-webkit-scrollbar { display: none; }
+.dim-botSettingsTabsList { width: max-content; min-width: 100%; display: flex; align-items: flex-end; gap: 24px; }
+.dim-botSettingsScroll { flex: 0 0 30px; width: 30px; height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, #646a73); cursor: pointer; }
+.dim-botSettingsScroll:hover:not(:disabled) { color: var(--dsw-alias-state-business-primary, #3370ff); background: var(--dsw-alias-interactive-bg-hover, #eef0f3); }
+.dim-botSettingsScroll:disabled { opacity: .3; cursor: default; }
+.dim-botSettingsScroll:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, #3370ff); outline-offset: -2px; }
 .dim-botSettingsTab { position: relative; min-height: 38px; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 6px 2px 9px; border: 0; color: var(--dsw-alias-label-secondary, #646a73); background: transparent; font: inherit; font-size: 13px; line-height: 20px; font-weight: 560; white-space: nowrap; cursor: pointer; transition: color .15s ease; }
 .dim-botSettingsTab::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 2px 2px 0 0; background: transparent; transform: scaleX(.45); transition: background .15s ease, transform .15s ease; }
 .dim-botSettingsTab:hover:not([aria-selected="true"]) { color: var(--dsw-alias-label-primary, #1f2329); }
@@ -735,7 +740,7 @@ const CSS = String.raw`
   .dim-loopbackRecovery { align-items: stretch; flex-direction: column; gap: 12px; }
   .dim-loopbackRecoveryAction { width: 100%; }
   .dim-deliverySectionHeading { align-items: stretch; flex-direction: column; }
-  .dim-botSettingsTabs { gap: 18px; }
+  .dim-botSettingsTabsList { gap: 18px; }
   .dim-deliveryBotId { grid-template-columns: minmax(0, 1fr) max-content; }
   .dim-deliveryBotId > span { grid-column: 1 / -1; }
   .dim-targetActions .dim-deliveryButton { flex: 1 1 auto; }

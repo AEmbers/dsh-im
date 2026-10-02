@@ -48,6 +48,8 @@ const EN = Object.freeze({
   'IM 面板加载失败': 'Could not load the IM panel',
   '更多机器人设置': 'More bot settings',
   '更多设置': 'More settings',
+  '向左滚动设置页签': 'Scroll settings tabs left',
+  '向右滚动设置页签': 'Scroll settings tabs right',
   '常用配置': 'Common settings',
   '机器人设置': 'Bot settings',
   '机器人设置页签': 'Bot settings tabs',

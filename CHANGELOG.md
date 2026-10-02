@@ -6,6 +6,11 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+### Fixed / 修复
+
+- 机器人「更多设置」页签在空间不足时显示左右滚动按钮，切换页签及调整容器宽度时自动保持选中项可见，并支持方向键与 Home / End 导航。（[#303](https://github.com/xmanrui/dsh-im/issues/303)）
+  Bot settings tabs now show scroll buttons when space is limited, keep the selected tab visible when switching tabs or resizing the container, and support arrow-key and Home / End navigation. ([#303](https://github.com/xmanrui/dsh-im/issues/303))
+
 ## [4.34.1] - 2026-10-02
 
 ### Fixed / 修复
