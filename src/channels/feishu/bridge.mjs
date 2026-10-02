@@ -1,6 +1,7 @@
 import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
+import { waitForFeishuOperation } from './feishu-channel.mjs';
 import {
   conversationKey,
   conversationScope,
@@ -721,6 +722,7 @@ export class FeishuHarnessBridge {
   /** Conversation keys with an IM ask in flight (set BEFORE the turn starts). */
   #imTurnKeys = new Set();
   #cardDataTimeoutMs;
+  #requestTimeoutMs;
   /** When true, approval/question interactions render as Feishu cards (buttons). */
   #interactionCards = true;
 
@@ -745,6 +747,7 @@ export class FeishuHarnessBridge {
     repairPollIntervalMs = REPAIR_POLL_INTERVAL_MS,
     repairLinkWaitMs = REPAIR_LINK_WAIT_MS,
     cardDataTimeoutMs = CARD_DATA_TIMEOUT_MS,
+    requestTimeoutMs = 15_000,
     replyTimeoutMs = 600_000,
     interactionCards = true,
     sessionSyncTargetsFor = null,
@@ -767,7 +770,8 @@ export class FeishuHarnessBridge {
     }
     if (!Number.isFinite(repairPollIntervalMs) || repairPollIntervalMs <= 0
       || !Number.isFinite(repairLinkWaitMs) || repairLinkWaitMs <= 0
-      || !Number.isFinite(cardDataTimeoutMs) || cardDataTimeoutMs <= 0) {
+      || !Number.isFinite(cardDataTimeoutMs) || cardDataTimeoutMs <= 0
+      || !Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
       throw new TypeError('Feishu timing values must be positive numbers');
     }
     if (stepPushClock !== null
@@ -804,6 +808,7 @@ export class FeishuHarnessBridge {
     this.#repairPollIntervalMs = repairPollIntervalMs;
     this.#repairLinkWaitMs = repairLinkWaitMs;
     this.#cardDataTimeoutMs = cardDataTimeoutMs;
+    this.#requestTimeoutMs = requestTimeoutMs;
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#interactionCards = interactionCards === true;
     this.#sessionSyncTargetsFor = typeof sessionSyncTargetsFor === 'function'
@@ -3128,6 +3133,14 @@ export class FeishuHarnessBridge {
     }
   }
 
+  #cardRequest(stage, operation) {
+    return waitForFeishuOperation(operation, {
+      signal: this.#signal,
+      timeoutMs: this.#requestTimeoutMs,
+      stage: `${stage} (${this.#requestTimeoutMs}ms)`,
+    });
+  }
+
   async #sendCard(chatId, cardJson, options = {}) {
     const updateMessageId = nonEmptyString(options.updateMessageId);
     const replyTo = nonEmptyString(options.replyTo);
@@ -3135,14 +3148,14 @@ export class FeishuHarnessBridge {
     // Session-sync cards target the user's openId (the synced DM is a user,
     // not a chat), delivered fresh without topic/thread handling.
     if (options.receiveIdType === 'open_id') {
-      const response = await this.#client.im.v1.message.create({
+      const response = await this.#cardRequest('card create', () => this.#client.im.v1.message.create({
         params: { receive_id_type: 'open_id' },
         data: {
           receive_id: chatId,
           msg_type: 'interactive',
           content: cardJson,
         },
-      });
+      }));
       if (response?.code && response.code !== 0) {
         throw new Error(`Feishu card send failed: ${response.msg || response.code}`);
       }
@@ -3153,10 +3166,10 @@ export class FeishuHarnessBridge {
 
     if (updateMessageId) {
       try {
-        const response = await this.#client.im.v1.message.patch({
+        const response = await this.#cardRequest('card patch', () => this.#client.im.v1.message.patch({
           path: { message_id: updateMessageId },
           data: { content: cardJson },
-        });
+        }));
         if (response?.code && response.code !== 0) {
           throw new Error(`Feishu card update failed: ${response.msg || response.code}`);
         }
@@ -3173,14 +3186,14 @@ export class FeishuHarnessBridge {
     const content = cardJson;
     if (replyTo) {
       try {
-        const response = await this.#client.im.v1.message.reply({
+        const response = await this.#cardRequest('card reply', () => this.#client.im.v1.message.reply({
           path: { message_id: replyTo },
           data: {
             msg_type: 'interactive',
             content,
             ...(this.#replyInThreadFor(replyTo) ? { reply_in_thread: true } : {}),
           },
-        });
+        }));
         if (response?.code && response.code !== 0) {
           throw new Error(`Feishu card reply failed: ${response.msg || response.code}`);
         }
@@ -3196,10 +3209,10 @@ export class FeishuHarnessBridge {
         this.#forgetTopicRoot(replyTo);
       }
     }
-    const response = await this.#client.im.v1.message.create({
+    const response = await this.#cardRequest('card create', () => this.#client.im.v1.message.create({
       params: { receive_id_type: 'chat_id' },
       data: { receive_id: chatId, msg_type: 'interactive', content: cardJson },
-    });
+    }));
     if (response?.code && response.code !== 0) {
       throw new Error(`Feishu card send failed: ${response.msg || response.code}`);
     }
@@ -4835,7 +4848,8 @@ export class FeishuHarnessBridge {
       );
       if (card.deliveryViaOpenId) {
         this.#logger.warn?.('[dsh-feishu] session-sync mirror card render failed:',
-          error?.message ?? String(error));
+          error?.message ?? String(error),
+          { sessionId: card.sessionSyncSessionId, turn: card.sessionSyncTurn });
       }
     }
   }
@@ -4886,6 +4900,7 @@ export class FeishuHarnessBridge {
       this.#logger.warn?.(
         '[dsh-feishu] step streaming card finish failed:',
         error?.message ?? String(error),
+        { sessionId: card.sessionSyncSessionId, turn: card.sessionSyncTurn },
       );
       return null;
     }
@@ -4936,10 +4951,10 @@ export class FeishuHarnessBridge {
   }
 
   async #patchStepCard(messageId, cardJson) {
-    const response = await this.#client.im.v1.message.patch({
+    const response = await this.#cardRequest('step card patch', () => this.#client.im.v1.message.patch({
       path: { message_id: messageId },
       data: { content: cardJson },
-    });
+    }));
     if (response?.code && response.code !== 0) {
       throw new Error(`Feishu step card patch failed: ${response.msg || response.code}`);
     }

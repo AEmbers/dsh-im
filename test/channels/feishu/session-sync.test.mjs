@@ -44,8 +44,8 @@ async function fixture(t, { state, targets = [target], create, patch, history = 
     client: { im: { v1: { message: {
       create: async request => {
         creates.push(structuredClone(request));
-        await create?.(request);
         const id = `card-${creates.length}`;
+        await create?.(request);
         visible.set(id, request.data.content);
         return { code: 0, data: { message_id: id } };
       },
@@ -108,6 +108,68 @@ for (const input of [user, scheduled]) {
     });
   }
 }
+
+for (const phase of ['create', 'running patch', 'final patch']) {
+  for (const lateOutcome of ['success', 'failure']) {
+    test(`mirror ${phase} timeout permits the next turn and ignores late ${lateOutcome}`, { timeout: 5_000 }, async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      let release, reject;
+      const gate = new Promise((resolve, fail) => { release = resolve; reject = fail; });
+      t.after(release);
+      let held = false;
+      const f = await fixture(t, {
+        targets: [target, other],
+        bridgeOptions: { requestTimeoutMs: 15_000 },
+        [phase === 'create' ? 'create' : 'patch']: async request => {
+          const final = request.data.content.includes('_已完成_');
+          if (!held && (phase === 'create' || (phase === 'final patch' ? final : !final))) {
+            held = true;
+            await gate;
+          }
+        },
+      });
+      f.emit(start()); f.emit(user()); await flush();
+      f.emit(answer()); await flush();
+      f.emit(end()); await flush();
+      assert.equal(held, true, 'the selected SDK request is in flight');
+      f.emit(start(2)); f.emit(user(2)); f.emit(answer('next answer', 2)); f.emit(end(2));
+      t.mock.timers.tick(15_000); await flush();
+      assert.ok([...f.visible.values()].some(text => text.includes('next answer')),
+        'a hanging request must not block the next turn');
+      await f.drain();
+      assert.equal(f.texts.filter(r => r[0] === 'bot-a' && r[3] === '[DSH 助手]\ncomplete answer').length, 1);
+      assert.ok(f.texts.some(r => r[0] === 'bot-b' && r[3] === '[DSH 助手]\ncomplete answer'));
+      assert.ok(f.warnings.some(args => args.some(arg => String(arg).includes('timed out'))));
+      const saved = structuredClone(f.state.mirrorEntries());
+      const delivered = structuredClone(f.texts);
+      const requests = [f.creates.length, f.patches.length];
+      if (lateOutcome === 'success') release();
+      else reject(new Error('late SDK failure'));
+      await flush();
+      assert.deepEqual(f.state.mirrorEntries(), saved, 'late results must not resume mirror persistence');
+      assert.deepEqual(f.texts, delivered, 'late results must not resend the final answer');
+      assert.deepEqual([f.creates.length, f.patches.length], requests, 'late results must not resume rendering');
+    });
+  }
+}
+
+test('runtime abort releases a mirror sealing wait before the request deadline', { timeout: 5_000 }, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(release);
+  const f = await fixture(t, { patch: async () => gate });
+  f.emit(start()); f.emit(user()); await f.drain();
+  f.emit(answer()); await flush();
+  f.emit(end()); await flush();
+  const drained = f.drain();
+  f.close();
+  // The mocked deadline has not advanced: only cancellation can release it.
+  await drained;
+  const requests = [f.creates.length, f.patches.length];
+  t.mock.timers.tick(60_000); await flush();
+  assert.deepEqual([f.creates.length, f.patches.length], requests);
+});
 
 test('scheduled sync accepts the existing card receipt without duplicate text', async t => {
   const f = await fixture(t);

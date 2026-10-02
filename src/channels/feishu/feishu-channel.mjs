@@ -80,12 +80,13 @@ function abortReason(signal) {
 }
 
 function operationTimeout(stage) {
-  const error = new Error(`Feishu file ${stage} timed out.`);
+  const error = new Error(`Feishu ${stage} timed out.`);
   error.code = 'provider-timeout';
   return error;
 }
 
-function waitForFileOperation(operation, { signal, timeoutMs, stage }) {
+// Bound the caller's wait even when the SDK does not honor cancellation.
+export function waitForFeishuOperation(operation, { signal, timeoutMs, stage = 'request' }) {
   signal?.throwIfAborted();
   const deadline = new AbortController();
   const operationSignal = signal
@@ -108,12 +109,19 @@ function waitForFileOperation(operation, { signal, timeoutMs, stage }) {
     const timer = setTimeout(() => deadline.abort(), timeoutMs);
     operationSignal.addEventListener('abort', onAbort, { once: true });
 
-    Promise.resolve().then(() => operation(operationSignal)).then(
+    Promise.resolve().then(() => {
+      operationSignal.throwIfAborted();
+      return operation(operationSignal);
+    }).then(
       (value) => finish(resolve, value),
       (error) => finish(reject, error),
     );
     if (operationSignal.aborted) onAbort();
   });
+}
+
+function waitForFileOperation(operation, { stage, ...options }) {
+  return waitForFeishuOperation(operation, { ...options, stage: `file ${stage}` });
 }
 
 function deliveryUuid(file, chatId, messageType) {

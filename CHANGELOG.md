@@ -8,6 +8,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Fixed / 修复
 
+- 飞书会话同步复用现有请求期限，为卡片创建、更新、封存和主动文字投递设置有限等待；SDK 请求持续挂起时进入原有失败与文字兜底路径，后续轮次可以继续，停止运行时也会释放当前等待。（[#294](https://github.com/xmanrui/dsh-im/issues/294)）
+  Feishu session sync now reuses the existing request deadline to bound card creation, updates, sealing, and proactive text delivery. Hanging SDK requests enter the existing failure and text fallback paths so later turns can continue, and stopping the runtime releases pending waits. ([#294](https://github.com/xmanrui/dsh-im/issues/294))
 - 机器人「更多设置」页签在空间不足时显示左右滚动按钮，切换页签及调整容器宽度时自动保持选中项可见，并支持方向键与 Home / End 导航。（[#303](https://github.com/xmanrui/dsh-im/issues/303)）
   Bot settings tabs now show scroll buttons when space is limited, keep the selected tab visible when switching tabs or resizing the container, and support arrow-key and Home / End navigation. ([#303](https://github.com/xmanrui/dsh-im/issues/303))
 

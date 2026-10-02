@@ -2,7 +2,7 @@ import { createConnectionDiagnostics, atConnectionStage } from '../shared/connec
 import { randomUUID } from 'node:crypto';
 import { FeishuHarnessBridge } from './bridge.mjs';
 import { cardActionProbeCard } from './feishu-cards.mjs';
-import { VerifiedFeishuChannel } from './feishu-channel.mjs';
+import { VerifiedFeishuChannel, waitForFeishuOperation } from './feishu-channel.mjs';
 import { normalizeFeishuGroupResponseMode } from './group-response-mode.mjs';
 import { normalizeFeishuStepPushMode } from './step-push-mode.mjs';
 import { createVoice } from './voice.mjs';
@@ -367,6 +367,7 @@ export class FeishuRuntime {
         voice: this.#voice,
         sessionSyncTargetsFor: this.#sessionSyncTargetsFor,
         repair: this.#repair,
+        requestTimeoutMs: this.#requestTimeoutMs,
         replyTimeoutMs: this.#replyTimeoutMs,
         // Interaction cards (approval/question buttons) are on by default.
         // Set DSH_IM_INTERACTION_CARDS=0 to fall back to plain-text replies.
@@ -703,13 +704,20 @@ export class FeishuRuntime {
     const content = format === 'markdown'
       ? { schema: '2.0', body: { elements: [{ tag: 'markdown', content: text }] } }
       : { text };
-    const response = await this.#client.im.v1.message.create({
+    const activeSignal = signal
+      ? AbortSignal.any([signal, this.#abortController.signal])
+      : this.#abortController.signal;
+    const response = await waitForFeishuOperation(() => this.#client.im.v1.message.create({
       params: { receive_id_type: receiveIdType },
       data: {
         receive_id: receiveId,
         msg_type: format === 'markdown' ? 'interactive' : 'text',
         content: JSON.stringify(content),
       },
+    }), {
+      signal: activeSignal,
+      timeoutMs: this.#requestTimeoutMs,
+      stage: `proactive text send (${this.#requestTimeoutMs}ms)`,
     });
     if (response?.code && response.code !== 0) {
       const error = new Error(`Feishu proactive delivery failed: ${response.msg || response.code}`);
