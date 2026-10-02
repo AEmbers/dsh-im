@@ -6,12 +6,29 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.34.2] - 2026-10-03
+
 ### Fixed / 修复
 
 - 飞书会话同步复用现有请求期限，为卡片创建、更新、封存和主动文字投递设置有限等待；SDK 请求持续挂起时进入原有失败与文字兜底路径，后续轮次可以继续，停止运行时也会释放当前等待。（[#294](https://github.com/xmanrui/dsh-im/issues/294)）
   Feishu session sync now reuses the existing request deadline to bound card creation, updates, sealing, and proactive text delivery. Hanging SDK requests enter the existing failure and text fallback paths so later turns can continue, and stopping the runtime releases pending waits. ([#294](https://github.com/xmanrui/dsh-im/issues/294))
 - 机器人「更多设置」页签在空间不足时显示左右滚动按钮，切换页签及调整容器宽度时自动保持选中项可见，并支持方向键与 Home / End 导航。（[#303](https://github.com/xmanrui/dsh-im/issues/303)）
   Bot settings tabs now show scroll buttons when space is limited, keep the selected tab visible when switching tabs or resizing the container, and support arrow-key and Home / End navigation. ([#303](https://github.com/xmanrui/dsh-im/issues/303))
+
+- 消息失败诊断区分请求超时与网络连接错误，跨 Host RPC 保留经过筛选的连接诊断信息；已知业务错误、主动取消和投递结果未知仍保留各自语义。错误提示提醒先检查会话记录，避免在结果不确定时立即重复发送。
+  Message failure diagnostics distinguish request timeouts from network errors and preserve allowlisted connection evidence across Host RPC. Known business errors, deliberate cancellation, and uncertain delivery retain their own semantics. Hints recommend checking conversation history before resubmitting when the outcome is uncertain.
+
+### Changed / 变更
+
+- 新建飞书和 QQ 机器人默认允许所有用户在私聊和群聊中对话及执行内置命令；可在访问设置中改为白名单或关闭普通用户命令权限。已有机器人的已保存策略和旧配置迁移逻辑保持不变。
+  New Feishu and QQ bots default to allowing all users to chat and run built-in commands in direct and group conversations. Access settings can restrict them to allowlists or disable ordinary-user commands. Existing saved policies and legacy configuration migration remain unchanged.
+
+### Notes / 使用说明
+
+- 新建机器人默认权限更开放，请按实际使用范围检查访问设置。飞书 SDK 请求超时只保证本地等待结束，不保证平台侧操作已取消；遇到超时或网络错误，请先核对聊天记录再决定是否重试。
+  New bots have more permissive defaults; review access settings for the intended audience. A Feishu SDK timeout bounds local waiting but does not guarantee cancellation on the provider side. Check chat history before retrying after a timeout or network error.
+- 依赖声明和 DSH `0.1.7-alpha.1` 兼容性声明保持不变；升级后重启 Host 并刷新管理页面。
+  Dependency declarations and declared DSH `0.1.7-alpha.1` compatibility remain unchanged. Restart the Host and refresh the management page after upgrading.
 
 ## [4.34.1] - 2026-10-02
 
@@ -1497,7 +1514,8 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 改进 npm 发布包结构，保留 CLI 入口并避免安装脚本拦截。
   Improved npm package contents to preserve the CLI entry point and avoid install-script blocking.
 
-[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.34.1...HEAD
+[Unreleased]: https://github.com/xmanrui/dsh-im/compare/v4.34.2...HEAD
+[4.34.2]: https://github.com/xmanrui/dsh-im/compare/v4.34.1...v4.34.2
 [4.34.1]: https://github.com/xmanrui/dsh-im/compare/v4.34.0...v4.34.1
 [4.34.0]: https://github.com/xmanrui/dsh-im/compare/v4.33.0...v4.34.0
 [4.33.0]: https://github.com/xmanrui/dsh-im/compare/v4.32.0...v4.33.0
