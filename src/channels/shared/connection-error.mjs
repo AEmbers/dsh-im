@@ -6,7 +6,7 @@ import { t } from './i18n.mjs';
 const reported = new WeakMap();
 const lastReport = new WeakMap();
 const stages = new WeakMap();
-const OWNED_REASONS = { 'connect-timeout': 'timeout', 'telegram-timeout': 'timeout', 'cli-timeout': 'timeout', 'telegram-response-invalid': 'invalid-response', 'office-protocol-mismatch': 'invalid-response' };
+const OWNED_REASONS = { 'connect-timeout': 'timeout', 'telegram-timeout': 'timeout', 'cli-timeout': 'timeout', 'provider-timeout': 'timeout', 'telegram-response-invalid': 'invalid-response', 'office-protocol-mismatch': 'invalid-response' };
 const STANDARD_NAMES = new Set(['Error', 'TypeError', 'SyntaxError', 'AggregateError', 'DOMException', 'AxiosError', 'TimeoutError', 'AbortError']);
 const KNOWN_MESSAGES = {
   'discord-401': 'Discord Bot Token 无效，请重新填写。',
@@ -37,18 +37,24 @@ export function extractConnectionEvidence(error) {
   const { chain, truncated } = connectionErrorChain(error);
   const errors = chain.map(e => ({
     type: STANDARD_NAMES.has(e.name) ? e.name : 'Error',
+    // Host RPC adapters carry safe diagnostic facts without the original Error graph.
     ...normalizeDiagnosticDetails({
-      reason: OWNED_REASONS[e.code] ?? e.code ?? (e.name === 'TimeoutError' ? 'timeout' : e instanceof SyntaxError ? 'invalid-json' : undefined),
+      reason: e.details?.reason, reasons: e.details?.reasons,
+      httpStatus: e.details?.httpStatus, providerCode: e.details?.providerCode,
+    }),
+    ...normalizeDiagnosticDetails({
+      // DOMException TimeoutError has a numeric legacy code; its name is authoritative.
+      reason: OWNED_REASONS[e.code] ?? (e.name === 'TimeoutError' ? 'timeout' : e.code ?? (e instanceof SyntaxError ? 'invalid-json' : undefined)),
       httpStatus: e.status ?? e.statusCode ?? e.response?.status,
       providerCode: e.providerCode,
     }),
     hasCause: Boolean(e.cause && typeof e.cause === 'object'),
     hasErrors: Array.isArray(e.errors),
   }));
-  const allReasons = [...new Set(errors.map(e => e.reason).filter(r => r && !['unknown', 'multiple-causes'].includes(r)))];
+  const allReasons = [...new Set(errors.flatMap(e => e.reason === 'multiple-causes' ? e.reasons ?? [] : [e.reason]).filter(r => r && !['unknown', 'multiple-causes'].includes(r)))];
   const precise = allReasons.filter(r => !['timeout', 'http-error', 'provider-rejected', 'invalid-response'].includes(r));
   const reasons = precise.length ? precise : allReasons;
-  const first = field => chain.map(e => normalizeDiagnosticDetails({ [field]: e[field] })[field]).find(v => v !== undefined);
+  const first = field => chain.map(e => normalizeDiagnosticDetails({ [field]: e[field] ?? e.details?.[field] })[field]).find(v => v !== undefined);
   return {
     chain, errors,
     details: normalizeDiagnosticDetails({

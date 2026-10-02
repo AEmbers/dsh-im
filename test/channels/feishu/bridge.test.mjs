@@ -5413,9 +5413,11 @@ test('a stream finalization failure falls back to text without repeating the pro
 
 test('bridge does not expose internal error details in a Feishu failure reply', async () => {
   const sent = [];
+  const logs = [];
   const seen = new Set();
   const status = { messagesReceived: 0, messagesReplied: 0, messagesRejected: 0 };
   const bridge = new FeishuHarnessBridge({
+    logger: { error: (...args) => logs.push(args) },
     client: {
       im: { v1: { message: { create: async (request) => {
         sent.push(JSON.parse(request.data.content).text);
@@ -5450,6 +5452,11 @@ test('bridge does not expose internal error details in a Feishu failure reply', 
   assert.doesNotMatch(sent[0], /secret-shaped-internal-detail|private\/path/);
   assert.equal(status.lastError, status.lastMessageError.message);
   assert.doesNotMatch(JSON.stringify(status), /secret-shaped-internal-detail|private\/path/);
+  const diagnostic = logs.find(([label]) => label.includes(status.lastMessageError.referenceId))?.[1];
+  assert.equal(diagnostic?.code, 'INTERNAL_UNKNOWN');
+  assert.equal(diagnostic?.referenceId, status.lastMessageError.referenceId);
+  assert.ok(Array.isArray(diagnostic?.errors));
+  assert.doesNotMatch(JSON.stringify(logs), /secret-shaped-internal-detail|private\/path/);
 });
 
 test('Feishu exposes a structured model rate limit without changing connection state', async () => {

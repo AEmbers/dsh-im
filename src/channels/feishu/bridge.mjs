@@ -77,6 +77,7 @@ import {
 import {
   channelDeliveryFailure,
   clearLastMessageFailure,
+  messageFailureDiagnostic,
   messageFailureText,
   setLastMessageFailure,
 } from '../shared/message-failure.mjs';
@@ -1493,7 +1494,7 @@ export class FeishuHarnessBridge {
     const failure = setLastMessageFailure(this.#status, error, { userMessage, reason });
     this.#logger?.[logLevel]?.(
       `[dsh-feishu] ${logLabel} failed [${failure.referenceId}]:`,
-      error?.message ?? String(error),
+      messageFailureDiagnostic(error, failure),
     );
     return failure;
   }

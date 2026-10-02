@@ -296,6 +296,35 @@ test('modern adapter keeps unmarked internal errors internal', async () => {
   });
 });
 
+test('modern adapter retains safe transport evidence through Harness RPC and message classification', async () => {
+  for (const [sourceError, expected] of [
+    [new DOMException('private timeout detail', 'TimeoutError'), 'REQUEST_TIMEOUT'],
+    [new TypeError('private URL and token', { cause: new AggregateError([
+      Object.assign(new Error('private DNS detail'), { code: 'ENOTFOUND' }),
+      Object.assign(new Error('private socket detail'), { code: 'ECONNREFUSED' }),
+    ]) }), 'NETWORK_ERROR'],
+  ]) {
+    sourceError.durationMs = 123;
+    sourceError.timeoutMs = 100;
+    const { ctx } = fakeContext({
+      async invoke() { throw sourceError; },
+      async stream() { throw new Error('unused'); },
+    });
+    const client = new HarnessClient({ apiProxy: modernHarnessApi(ctx), workspace: '/workspace' });
+    await assert.rejects(() => client.rpc('session.prompt', { sessionId: 'session', text: 'test' }), error => {
+      assert.equal(error.code, 'internal');
+      assert.equal(error.details.durationMs, 123);
+      assert.equal(error.details.timeoutMs, 100);
+      const failure = classifyMessageFailure(error);
+      assert.equal(failure.code, expected);
+      assert.match(failure.message, /不要立即重复提交/u);
+      if (expected === 'NETWORK_ERROR') assert.deepEqual(failure.details.reasons, ['ENOTFOUND', 'ECONNREFUSED']);
+      assert.doesNotMatch(JSON.stringify(failure), /private|token/u);
+      return true;
+    });
+  }
+});
+
 test('modern adapter exposes DSH v2 live assistant chunks through legacy history', async () => {
   const records = [
     {

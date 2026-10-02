@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { hasActiveHarnessInteractionOwner } from '../../src/channels/shared/harness-client.mjs';
+import { extractConnectionEvidence } from '../../src/channels/shared/connection-error.mjs';
 
 const modernApis = new WeakMap();
 
@@ -25,7 +26,7 @@ function failureOf(error) {
   return {
     code: 'internal',
     message: error instanceof Error ? error.message : String(error),
-    details: {},
+    details: extractConnectionEvidence(error).details,
   };
 }
 

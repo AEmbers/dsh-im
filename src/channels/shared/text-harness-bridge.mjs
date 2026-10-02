@@ -936,12 +936,12 @@ export class TextHarnessBridge {
       const finalDeliveryUnknown = textReceipt?.deliveryOutcome === 'unknown';
       if (textReceipt?.deliveryOutcome === 'failed') {
         textDeliveryError = channelDeliveryFailure(
-          new Error(`Final text delivery failed (${textReceipt.reason ?? 'unknown'})`),
+          Object.assign(new Error('Final text delivery failed'), { code: textReceipt.reason }),
           { uncertain: false },
         );
       } else if (finalDeliveryUnknown) {
         textDeliveryError = channelDeliveryFailure(
-          new Error(`Final text delivery outcome is unknown (${textReceipt.reason ?? 'unknown'})`),
+          Object.assign(new Error('Final text delivery outcome is unknown'), { code: textReceipt.reason }),
         );
       }
       // A failed final text must not discard an already registered result file.

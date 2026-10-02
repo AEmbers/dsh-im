@@ -794,6 +794,8 @@ test('Telegram keeps an uncertain Rich receipt and still delivers the registered
   assert.equal(receipt.presentation, 'telegram-text-and-files');
   assert.equal(receipt.deliveryOutcome, 'unknown');
   assert.equal(receipt.reason, 'telegram-timeout');
+  assert.equal(bridge.status.lastMessageError.code, 'CHANNEL_DELIVERY_UNCERTAIN');
+  assert.equal(bridge.status.lastMessageError.details.reason, 'timeout');
   assert.deepEqual(receipt.providerMessageIds, ['1302']);
   assert.deepEqual(receipt.artifacts, [{ artifactId: 'telegram-rich-artifact', outcome: 'sent' }]);
 });

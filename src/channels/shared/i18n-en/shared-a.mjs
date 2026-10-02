@@ -104,6 +104,10 @@ export default {
     'This message contains an image or file that cannot be processed. Adjust it and send it again.',
   '任务未完成，暂时无法确定原因。请重试；若持续发生，请将参考号提供给管理员。':
     'The task did not finish and the cause could not be determined. Try again; if it persists, give the reference ID to an administrator.',
+  '请求超时，当前操作结果尚未确认。请先检查任务状态或聊天记录，不要立即重复提交。':
+    'The request timed out and its outcome is unconfirmed. Check the task status or chat history before submitting it again.',
+  '网络请求失败，当前操作结果尚未确认。请先检查任务状态或聊天记录，不要立即重复提交。':
+    'The network request failed and its outcome is unconfirmed. Check the task status or chat history before submitting it again.',
   '错误码：{code}；参考号：{referenceId}': 'Error code: {code}; reference: {referenceId}',
   '{label}机器人': '{label} bot',
   '目前支持文字和图片消息。': 'Only text and image messages are supported at the moment.',

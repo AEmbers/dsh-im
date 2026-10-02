@@ -54,6 +54,23 @@ test('keeps valid HTTP evidence, stages and timings without diagnosing login exp
   assert.match(diagnostics.report(cause('ETIMEDOUT')).publicError.details.hint, /请求超时/);
 });
 
+test('RPC diagnostic facts are allowlisted and direct evidence takes precedence', () => {
+  const evidence = extractConnectionEvidence({
+    code: 'internal',
+    details: {
+      reason: 'multiple-causes', reasons: ['ENOTFOUND', 'ECONNREFUSED', 'private-token'],
+      durationMs: 125, timeoutMs: 5000, host: 'private.example',
+      hint: 'private-token', stack: '/private/path', providerCode: 'private-token',
+    },
+  });
+  assert.deepEqual(evidence.details.reasons, ['ENOTFOUND', 'ECONNREFUSED']);
+  assert.equal(evidence.details.durationMs, 125);
+  assert.equal(evidence.details.timeoutMs, 5000);
+  const { chain, ...safe } = evidence;
+  assert.doesNotMatch(JSON.stringify(safe), /private/);
+  assert.equal(extractConnectionEvidence({ code: 'ECONNRESET', details: { reason: 'timeout' } }).details.reason, 'ECONNRESET');
+});
+
 test('Controller and RPC share a reference; retries deduplicate until recovery while user actions remain distinct', () => {
   let time = 0;
   const logs = [];

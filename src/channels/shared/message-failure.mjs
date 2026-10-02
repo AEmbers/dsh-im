@@ -1,4 +1,4 @@
-import { extractConnectionEvidence } from './connection-error.mjs';
+import { connectionHint, extractConnectionEvidence } from './connection-error.mjs';
 import { diagnosticFields } from './diagnostic-details.mjs';
 import { randomUUID } from 'node:crypto';
 
@@ -90,6 +90,10 @@ const FAILURE_MESSAGES = Object.freeze({
     '回复已经生成，但当前渠道暂时无法发送。请稍后重试。',
   INPUT_INVALID:
     '当前消息包含无法处理的图片或文件。请调整后重新发送。',
+  REQUEST_TIMEOUT:
+    '请求超时，当前操作结果尚未确认。请先检查任务状态或聊天记录，不要立即重复提交。',
+  NETWORK_ERROR:
+    '网络请求失败，当前操作结果尚未确认。请先检查任务状态或聊天记录，不要立即重复提交。',
   INTERNAL_UNKNOWN:
     '任务未完成，暂时无法确定原因。请重试；若持续发生，请将参考号提供给管理员。',
 });
@@ -156,14 +160,28 @@ function failureCode(error) {
     return 'CHANNEL_RATE_LIMIT';
   }
   if (['channel-delivery-uncertain', 'delivery-uncertain', 'artifact-delivery-uncertain']
-    .includes(code)) {
+    .includes(code) || error?.deliveryOutcome === 'unknown') {
     return 'CHANNEL_DELIVERY_UNCERTAIN';
   }
   if (code === 'channel-delivery-failed' || code.startsWith('artifact-')
-    || ['network-error', 'timeout'].includes(code)) {
+    || code === 'network-error') {
     return 'CHANNEL_DELIVERY';
   }
   return 'INTERNAL_UNKNOWN';
+}
+
+// Only refine the unknown fallback, using the same allowlisted evidence as the UI.
+// Mixed unrelated causes and cancellation do not establish a network diagnosis.
+function transportFailureCode(error, details) {
+  if (error?.name === 'AbortError' || error?.code === 'cancelled') return 'INTERNAL_UNKNOWN';
+  const reasons = details.reason === 'multiple-causes' ? details.reasons : [details.reason];
+  const timeout = reason => reason === 'timeout' || reason === 'ETIMEDOUT' || /_TIMEOUT$/u.test(reason);
+  if (reasons?.length && reasons.every(timeout)) return 'REQUEST_TIMEOUT';
+  const network = reason => timeout(reason) || [
+    'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET',
+    'ENETUNREACH', 'EHOSTUNREACH', 'ERR_NETWORK_ACCESS_DENIED', 'ERR_PROXY_CONNECTION_FAILED',
+  ].includes(reason) || /CERT|TLS|SSL|ISSUER|SIGNATURE/u.test(reason);
+  return reasons?.length && reasons.every(network) ? 'NETWORK_ERROR' : 'INTERNAL_UNKNOWN';
 }
 
 function safeReferenceId(value) {
@@ -185,13 +203,17 @@ export function classifyMessageFailure(error, {
 } = {}) {
   const safeReason = safeFailureReason(reason);
   const classifiedCode = failureCode(error);
-  const code = classifiedCode === 'INTERNAL_UNKNOWN'
+  const businessCode = classifiedCode === 'INTERNAL_UNKNOWN'
     && safeReason
     && typeof userMessage === 'string'
     && userMessage.trim()
     ? 'INPUT_INVALID'
     : classifiedCode;
   const details = extractConnectionEvidence(error).details;
+  const code = businessCode === 'INTERNAL_UNKNOWN'
+    ? transportFailureCode(error, details)
+    : businessCode;
+  if (code === 'REQUEST_TIMEOUT' || code === 'NETWORK_ERROR') details.hint = connectionHint(details);
   return Object.freeze({
     ...(code === 'INTERNAL_UNKNOWN' || details.reason !== 'unknown' || details.httpStatus || details.providerCode ? { details } : {}),
     code,
