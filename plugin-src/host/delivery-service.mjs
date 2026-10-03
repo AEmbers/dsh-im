@@ -30,6 +30,7 @@ const DELIVERY_ERROR_CODES = new Set([
   'bot-not-connected',
   'target-rejected',
   'delivery-failed',
+  'send-result-unknown',
   'session-sync-unavailable',
   'cancelled',
 ]);
@@ -314,10 +315,10 @@ export class DeliveryService {
     } catch (error) { throw publicOperationError(error); }
   }
 
-  async sendChecked(botId, targetId, text, { expectedFingerprint, expectedTargetDigest, signal, format = 'plain' } = {}) {
+  async sendChecked(botId, targetId, text, { expectedFingerprint, expectedTargetDigest, signal, format = 'plain', receipt = false } = {}) {
     const id = botIdOf(botId);
     const key = targetIdOf(targetId);
-    if (typeof text !== 'string' || !text.trim() || !['plain', 'markdown'].includes(format)
+    if (typeof text !== 'string' || !text.trim() || !['plain', 'markdown'].includes(format) || typeof receipt !== 'boolean'
       || !/^[a-f0-9]{64}$/.test(expectedFingerprint ?? '') || !/^[a-f0-9]{64}$/.test(expectedTargetDigest ?? '')) {
       throw deliveryError('bad-request');
     }
@@ -341,14 +342,22 @@ export class DeliveryService {
         throw deliveryError('capability-unavailable');
       }
       if (account.account?.fingerprint !== expectedFingerprint) throw deliveryError('account-changed');
+      if (receipt && (!account.capabilities?.includes('proactive-receipt-checked') || target.kind !== 'group'))
+        throw deliveryError('capability-unavailable');
       const beforeSend = () => {
         cancellation(signal);
         this.#assertRegistered(registration);
       };
       beforeSend();
-      await adapter.sendText(id, target, text, { signal, expectedFingerprint, beforeSend,
+      const result = await adapter.sendText(id, target, text, { signal, expectedFingerprint, beforeSend,
+        ...(receipt ? { receipt: true } : {}),
         ...(format === 'markdown' ? { format } : {}) });
-      return { sent: true };
+      if (!receipt) return { sent: true };
+      if (result?.sent !== true || result.receipt?.version !== 1
+        || typeof result.receipt.messageId !== 'string' || !result.receipt.messageId || result.receipt.messageId.length > 512
+        || result.receipt.conversationId !== target.route.chatId)
+        throw deliveryError('send-result-unknown');
+      return { sent: true, receipt: { version: 1, messageId: result.receipt.messageId, conversationId: result.receipt.conversationId } };
     } catch (error) { throw publicOperationError(error); }
   }
 
