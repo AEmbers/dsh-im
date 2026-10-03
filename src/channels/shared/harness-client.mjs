@@ -242,10 +242,12 @@ function turnStoppedError() {
   return error;
 }
 
-function workspacePaths(value) {
+function workspaceEntries(value) {
   if (!Array.isArray(value?.items)) return [];
   return value.items.flatMap((item) => (
-    typeof item?.path === 'string' && isAbsolute(item.path) ? [item.path] : []
+    typeof item?.path === 'string' && isAbsolute(item.path)
+      ? [{ path: item.path, title: typeof item.title === 'string' ? item.title : '' }]
+      : []
   ));
 }
 
@@ -1081,8 +1083,12 @@ export class HarnessClient {
   }
 
   async listWorkspaces(options = {}) {
+    return (await this.listWorkspaceEntries(options)).map((item) => item.path);
+  }
+
+  async listWorkspaceEntries(options = {}) {
     await this.ensureRunning(options);
-    return workspacePaths(await this.rpc('workspace.list', {}, 30_000, options));
+    return workspaceEntries(await this.rpc('workspace.list', {}, 30_000, options));
   }
 
   async listWorkspaceSessions(workspacePath, options = {}) {

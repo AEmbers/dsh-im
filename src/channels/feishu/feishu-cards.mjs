@@ -14,6 +14,7 @@
  * without button callbacks.
  */
 
+import { posix, win32 } from 'node:path';
 import { t } from '../shared/i18n.mjs';
 
 export const MENU_PAGE_SIZE = 10;
@@ -87,9 +88,56 @@ function initialIndex(options, currentValue) {
   return idx >= 0 ? idx + 1 : 0;
 }
 
+function cleanTitle(value) {
+  return String(value ?? '').replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
+}
+
 function safeTitle(value) {
-  const title = String(value ?? '').replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ').replace(/\s+/gu, ' ').trim();
-  return title || t('暂无标题');
+  return cleanTitle(value) || t('暂无标题');
+}
+
+const WORKSPACE_LABEL_LENGTH = 22;
+
+/** Display labels only: paths and their snapshot order remain the callback identity. */
+function workspaceLabels(paths, titles = {}) {
+  const entries = paths.map((path) => {
+    const api = /^[a-z]:[\\/]|^\\\\/iu.test(path) ? win32 : posix;
+    const normalized = api.normalize(path);
+    const name = cleanTitle(api.basename(normalized) || api.parse(normalized).root);
+    const base = (typeof titles[path] === 'string' && cleanTitle(titles[path])) || name;
+    return {
+      api, base, label: base, parent: api.dirname(normalized),
+      context: base === name ? '' : api.basename(normalized),
+    };
+  });
+  const counts = () => {
+    const result = new Map();
+    for (const { label } of entries) result.set(label, (result.get(label) ?? 0) + 1);
+    return result;
+  };
+  // Grow only ambiguous path suffixes; stop at the root even if display text collides.
+  for (;;) {
+    const repeated = counts();
+    let changed = false;
+    for (const entry of entries) {
+      if (repeated.get(entry.label) < 2 || entry.parent === null) continue;
+      const { api, parent } = entry;
+      entry.context = api.join(api.basename(parent) || parent, entry.context);
+      entry.label = `${entry.base} · ${cleanTitle(entry.context)}`;
+      const next = api.dirname(parent);
+      entry.parent = next === parent ? null : next;
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  for (const entry of entries) {
+    const chars = Array.from(entry.label);
+    if (chars.length > WORKSPACE_LABEL_LENGTH) {
+      entry.label = `${chars.slice(0, 11).join('')}…${chars.slice(-10).join('')}`;
+    }
+  }
+  const repeated = counts();
+  return entries.map(({ label }) => ({ label, numbered: repeated.get(label) > 1 }));
 }
 
 function cardWith(headerText, elements) {
@@ -117,6 +165,7 @@ function backButton() {
  *   4. 系统 → 状态 · 帮助
  * `ctx` bundle:
  *   - workspaces: string[]          (工作区下拉选项)
+ *   - workspaceTitles: object      (可选，按绝对路径索引的工作区名称)
  *   - currentWorkspace: string|null (当前工作区,下拉高亮)
  *   - currentSession: {id,title}|null (当前绑定会话,续写目标)
  *   - sessions: {id,title}[]        (最近会话,供会话下拉切换)
@@ -130,6 +179,7 @@ function backButton() {
 export function menuCard(ctx) {
   const {
     workspaces = [],
+    workspaceTitles = {},
     currentWorkspace = null,
     currentSession = null,
     sessions = [],
@@ -188,8 +238,9 @@ export function menuCard(ctx) {
 
   let workspaceDropdown = null;
   if (hasWorkspaces) {
-    const wsOptions = workspaces.slice(0, 20).map((path) => ({
-      text: { tag: 'plain_text', content: `${path === currentWorkspace ? '✓ ' : ''}${path}` },
+    const labels = workspaceLabels(workspaces, workspaceTitles);
+    const wsOptions = workspaces.slice(0, 20).map((path, index) => ({
+      text: { tag: 'plain_text', content: `${path === currentWorkspace ? '✓ ' : ''}${labels[index].numbered ? `${index + 1}. ` : ''}${labels[index].label}` },
       value: path,
     }));
     workspaceDropdown = {
@@ -726,7 +777,8 @@ export function sessionListCard(workspace, sessions, page, total, watchedSession
 // ── Workspace list card (preserved, with back button) ─────────────────────
 
 /** The workspace list card (switch-workspace buttons + reply fallback). */
-export function workspaceListCard(paths, current) {
+export function workspaceListCard(paths, current, titles = {}) {
+  const labels = workspaceLabels(paths, titles);
   const elements = paths.length === 0
     ? [
         { tag: 'div', text: markdown(t('当前 Host 上没有已登记的工作区。')) },
@@ -735,7 +787,7 @@ export function workspaceListCard(paths, current) {
     : [
         { tag: 'div', text: markdown(t('回复数字切换工作区，或点击按钮：')) },
         ...paths.map((path, index) => button(
-          `${index + 1}. ${path}${path === current ? t('（当前）') : ''}`,
+          `${index + 1}. ${labels[index].label}${path === current ? t('（当前）') : ''}`,
           `workspace:${path}`,
         )),
         { tag: 'hr' },

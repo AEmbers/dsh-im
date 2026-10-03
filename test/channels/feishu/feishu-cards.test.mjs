@@ -96,6 +96,55 @@ test('menu exposes the increased command set and keeps permission completion num
   assert.equal(actions.includes('repair'), false);
 });
 
+test('workspace cards share title labels while preserving full paths and selection', () => {
+  const paths = [
+    'E:\\very-long-common-prefix\\DS.HarnessWorkspace\\research',
+    'E:\\very-long-common-prefix\\DS.HarnessWorkspace\\交流区',
+    '/data/customer-a/project', '/data/customer-b/project',
+    '/data/a', '/data/b', '/', 'C:\\', '\\\\server\\share\\notes',
+  ];
+  const titles = { [paths[0]]: '  策略\n研究\u202e  ', [paths[1]]: '\n',
+    '/data/a': '研究', '/data/b': '研究', '/': 123 };
+  const expected = ['策略 研究', '交流区', 'project · customer-a', 'project · customer-b',
+    '研究 · data/a', '研究 · data/b', '/', 'C:\\', 'notes'];
+  const menu = JSON.parse(menuCard({ workspaces: paths, workspaceTitles: titles, currentWorkspace: paths[0] }));
+  const picker = selects(menu).find((item) => item.name === 'workspace_pick');
+  assert.equal(picker.initial_index, 1);
+  assert.deepEqual(picker.options.map((item) => item.value), paths);
+  assert.deepEqual(picker.options.map((item) => item.text.content), expected.map((label, i) => `${i ? '' : '✓ '}${label}`));
+  const list = buttons(JSON.parse(workspaceListCard(paths, paths[0], titles))).slice(0, paths.length);
+  assert.deepEqual(list.map((item) => item.text.content), expected.map((label, i) => `${i + 1}. ${label}${i ? '' : '（当前）'}`));
+  assert.deepEqual(list.map((item) => item.behaviors[0].value.action), paths.map((path) => `workspace:${path}`));
+});
+
+test('workspace labels distinguish nested parents and truncation collisions without splitting emoji', () => {
+  const paths = ['/a/same/project', '/b/same/project', '/data/a', '/data/b', '/data/emoji'];
+  const titles = { '/data/a': '前'.repeat(11) + 'A'.repeat(20) + '后'.repeat(10),
+    '/data/b': '前'.repeat(11) + 'B'.repeat(20) + '后'.repeat(10), '/data/emoji': '😀'.repeat(30) };
+  const menu = JSON.parse(menuCard({ workspaces: paths, workspaceTitles: titles }));
+  const picker = selects(menu).find((item) => item.name === 'workspace_pick');
+  const labels = picker.options.map((item) => item.text.content);
+  assert.deepEqual(labels.slice(0, 2), ['project · a/same', 'project · b/same']);
+  assert.equal(labels[2], `3. ${'前'.repeat(11)}…${'后'.repeat(10)}`);
+  assert.equal(labels[3], `4. ${'前'.repeat(11)}…${'后'.repeat(10)}`);
+  assert.equal(labels[4], '😀'.repeat(11) + '…' + '😀'.repeat(10));
+  assert.equal(new Set(labels).size, paths.length);
+  const list = buttons(JSON.parse(workspaceListCard(paths, null, titles)));
+  assert.equal(list[2].text.content, labels[2], 'list numbering is not duplicated');
+});
+
+test('workspace label disambiguation uses the full snapshot before the menu limit', () => {
+  const paths = Array.from({ length: 21 }, (_, i) => `/group${i}/item`);
+  const titles = Object.fromEntries(paths.map((path, i) => [path, i % 20 === 0 ? '重复' : `名称${i}`]));
+  const picker = selects(JSON.parse(menuCard({ workspaces: paths, workspaceTitles: titles })))
+    .find((item) => item.name === 'workspace_pick');
+  assert.equal(picker.options.length, 20);
+  assert.equal(picker.options[0].text.content, '重复 · group0/item');
+  const list = buttons(JSON.parse(workspaceListCard(paths, null, titles)));
+  assert.equal(list[0].text.content, `1. ${picker.options[0].text.content}`);
+  assert.equal(list[20].text.content, '21. 重复 · group20/item');
+});
+
 test('menu new-session states remain visible while only that action is disabled', () => {
   const context = {
     workspaces: ['/work'],

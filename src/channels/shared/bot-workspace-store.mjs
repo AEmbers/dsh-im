@@ -1709,6 +1709,7 @@ export function createBotWorkspaceScope(
         };
       }
       if ((property === 'listWorkspaces'
+        || property === 'listWorkspaceEntries'
         || property === 'listWorkspaceSessions'
         || property === 'listModels')
         && typeof target[property] === 'function') {

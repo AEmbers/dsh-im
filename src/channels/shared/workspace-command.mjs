@@ -62,17 +62,19 @@ export function parseSessionListArgument(value) {
   return { selector: '', limit };
 }
 
+async function existingWorkspacePath(value) {
+  const workspace = normalizedWorkspacePath(value);
+  if (!workspace) return null;
+  try {
+    if (!(await stat(workspace)).isDirectory()) return null;
+    return normalizedWorkspacePath(await realpath(workspace));
+  } catch {
+    return null;
+  }
+}
+
 async function existingWorkspacePaths(values) {
-  const checked = await Promise.all(values.map(async (value) => {
-    const workspace = normalizedWorkspacePath(value);
-    if (!workspace) return null;
-    try {
-      if (!(await stat(workspace)).isDirectory()) return null;
-      return normalizedWorkspacePath(await realpath(workspace));
-    } catch {
-      return null;
-    }
-  }));
+  const checked = await Promise.all(values.map(existingWorkspacePath));
   return [...new Set(checked.filter(Boolean))];
 }
 
@@ -109,16 +111,26 @@ async function selectedWorkspacePath(value) {
   }
 }
 
-export async function workspacePathSnapshot(harness, options = {}) {
-  const listed = await harness.listWorkspaces(options);
+export async function workspacePathSnapshot(harness, { includeTitles = false, ...options } = {}) {
+  const withEntries = includeTitles && typeof harness.listWorkspaceEntries === 'function';
+  const listed = await (withEntries ? harness.listWorkspaceEntries(options) : harness.listWorkspaces(options));
   const currentValue = typeof harness?.currentWorkspace === 'function'
     ? harness.currentWorkspace()
     : null;
-  const [current] = currentValue ? await existingWorkspacePaths([currentValue]) : [];
-  const registered = await existingWorkspacePaths(Array.isArray(listed) ? listed : []);
-  const paths = [...new Set([...(current ? [current] : []), ...registered])];
+  const current = await existingWorkspacePath(currentValue);
+  const entries = await Promise.all((Array.isArray(listed) ? listed : []).map(async (item) => ({
+    path: await existingWorkspacePath(withEntries ? item?.path : item),
+    title: withEntries ? safeDisplayText(item?.title) : '',
+  })));
+  const paths = [...new Set([...(current ? [current] : []), ...entries.map((item) => item.path).filter(Boolean)])];
+  const titles = {};
+  if (includeTitles) {
+    for (const item of entries) {
+      if (item.path && item.title && !titles[item.path]) titles[item.path] = item.title;
+    }
+  }
   harness.assertWorkspaceScope?.();
-  return { current: current ?? null, paths };
+  return { current: current ?? null, paths, ...(includeTitles ? { titles } : {}) };
 }
 
 export function splitWorkspaceCommandMessage(message) {

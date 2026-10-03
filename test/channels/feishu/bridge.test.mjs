@@ -6224,6 +6224,76 @@ test('single-select workspace ids preserve commas', async () => {
   assert.deepEqual(selected, [workspace]);
 });
 
+test('workspace titles flow through both cards, refreshes, and path-based dropdown/button/number picks', async (t) => {
+  const root = realpathSync(await mkdtemp(join(tmpdir(), 'dsh-workspace-titles-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = [join(root, 'a'), join(root, 'b')];
+  paths.forEach((path) => mkdirSync(path));
+  let current = paths[0];
+  let title = '策略研究';
+  let calls = 0;
+  const selected = [];
+  const sent = [];
+  const patches = [];
+  const harness = {
+    ...sessionsHarness(0),
+    currentWorkspace: () => current,
+    listWorkspaces() { assert.fail('metadata request must not also request paths'); },
+    async listWorkspaceEntries({ signal, ...rest }) {
+      assert.ok(signal instanceof AbortSignal);
+      assert.deepEqual(rest, {});
+      calls += 1;
+      return [{ path: paths[1], title: '交流区' }, { path: paths[0], title }];
+    },
+    switchWorkspace: async (path) => { selected.push(path); current = path; return path; },
+  };
+  const bridge = new FeishuHarnessBridge({
+    client: cardClient(async (message) => sent.push(message), async (request) => patches.push(request)),
+    channel: {}, harness, state: stateFixture().state, status: bridgeStatus(),
+    allowedSenderOpenIds: new Set(['ou_owner']),
+  });
+  let input = 0;
+  const send = async (text) => {
+    await bridge.accept(event(`workspace-title-${++input}`, text, { senderOpenId: 'ou_owner' }));
+    await bridge.waitForIdle();
+  };
+  const picker = (card) => selectsFromCard(card).find((item) => item.name === 'workspace_pick');
+  await send('/m');
+  assert.equal(calls, 1);
+  assert.deepEqual(picker(sent.at(-1).content).options, [
+    { text: { tag: 'plain_text', content: '✓ 策略研究' }, value: paths[0] },
+    { text: { tag: 'plain_text', content: '交流区' }, value: paths[1] },
+  ]);
+  await bridge.onCardAction({
+    ...cardActionEvent('om_card_1', 'workspace_pick', 'ou_owner'),
+    action: { value: { action: 'workspace_pick' }, option: paths[1] },
+  });
+  await bridge.waitForIdle();
+  assert.deepEqual(selected, [paths[1]]);
+  assert.equal(picker(JSON.parse(patches.at(-1).data.content)).options[0].text.content, '✓ 交流区');
+  assert.ok(sent.some((item) => item.msgType === 'text' && item.content.includes(paths[1])));
+
+  await send('/workspacelist');
+  const list = buttonsFromCard(sent.at(-1).content).filter((button) => callbackAction(button).startsWith('workspace:'));
+  assert.deepEqual(list.map((button) => button.text.content), ['1. 交流区（当前）', '2. 策略研究']);
+  await send('2');
+  assert.deepEqual(selected, [paths[1], paths[0]]);
+
+  await send('/workspacelist');
+  await bridge.onCardAction(cardActionEvent(`om_card_${sent.length}`, `workspace:${paths[1]}`, 'ou_owner'));
+  await bridge.waitForIdle();
+  assert.deepEqual(selected, [paths[1], paths[0], paths[1]]);
+  title = '策略研究新版';
+  await send('/m');
+  assert.equal(picker(sent.at(-1).content).options[1].text.content, title);
+
+  harness.listWorkspaceEntries = async () => { throw new Error('unavailable'); };
+  await send('/m');
+  assert.deepEqual(picker(sent.at(-1).content).options, [
+    { text: { tag: 'plain_text', content: '✓ b' }, value: paths[1] },
+  ]);
+});
+
 test('menu optional Host data is bounded by the card data timeout', async () => {
   const fixture = stateFixture();
   const waitForAbort = ({ signal }) => new Promise((resolve, reject) => {

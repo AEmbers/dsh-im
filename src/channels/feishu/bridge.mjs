@@ -3041,14 +3041,14 @@ export class FeishuHarnessBridge {
 
   async #showWorkspaces({ chatId, key, replyTo = null }, { updateMessageId = null } = {}) {
     try {
-      const { current, paths } = await workspacePathSnapshot(
+      const { current, paths, titles } = await workspacePathSnapshot(
         this.#harness,
-        { signal: this.#cardDataSignal() },
+        { signal: this.#cardDataSignal(), includeTitles: true },
       );
       this.#rememberMenu(key, { kind: 'workspaces', paths });
       await this.#sendCard(
         chatId,
-        workspaceListCard(paths, current),
+        workspaceListCard(paths, current, titles),
         { key, updateMessageId, replyTo },
       );
     } catch (error) {
@@ -3239,7 +3239,7 @@ export class FeishuHarnessBridge {
     const dataSignal = this.#cardDataSignal();
     // Independent sections start together. Each one degrades on its own so a
     // slow preset/model RPC cannot force redundant session-list scans.
-    const workspaceTask = workspacePathSnapshot(this.#harness, { signal: dataSignal })
+    const workspaceTask = workspacePathSnapshot(this.#harness, { signal: dataSignal, includeTitles: true })
       .catch(() => {
         const current = typeof this.#harness.currentWorkspace === 'function'
           ? this.#harness.currentWorkspace()
@@ -3316,7 +3316,7 @@ export class FeishuHarnessBridge {
     const archiveVisible = this.#state?.includesArchivedSessions?.() ?? false;
     this.#rememberMenu(key, { kind: 'menu', chatId });
     const menuContext = {
-      workspaces, currentWorkspace,
+      workspaces, currentWorkspace, workspaceTitles: snapshot.titles,
       currentSession: currentSessionId ? { id: currentSessionId, title: currentSessionTitle } : null,
       sessions, archiveVisible, presetCatalog, modelCatalog,
       newSessionAction: { id: randomUUID(), status: 'idle' },

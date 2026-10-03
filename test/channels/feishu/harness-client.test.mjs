@@ -288,6 +288,33 @@ test('HarnessClient lists only absolute workspace paths', async () => {
   assert.deepEqual(await client.listWorkspaces(), []);
 });
 
+test('HarnessClient workspace entries retain only paths and optional titles in one RPC', async () => {
+  const client = new HarnessClient({ baseUrl: 'http://127.0.0.1:3080', workspace: '/tmp' });
+  const options = { signal: new AbortController().signal };
+  let calls = 0;
+  client.ensureRunning = async (received) => assert.equal(received, options);
+  client.rpc = async (method, payload, timeout, received) => {
+    calls += 1;
+    assert.equal(method, 'workspace.list');
+    assert.deepEqual(payload, {});
+    assert.equal(timeout, 30_000);
+    assert.equal(received, options);
+    return { items: [
+      { path: '/tmp/a', title: '策略研究', sessionIds: ['private'] },
+      { path: '/tmp/b', title: 123 }, { path: '/tmp/c' },
+      { path: 'relative', title: 'invalid' }, null,
+    ] };
+  };
+  assert.deepEqual(await client.listWorkspaceEntries(options), [
+    { path: '/tmp/a', title: '策略研究' }, { path: '/tmp/b', title: '' }, { path: '/tmp/c', title: '' },
+  ]);
+  assert.equal(calls, 1);
+  assert.deepEqual(await client.listWorkspaces(options), ['/tmp/a', '/tmp/b', '/tmp/c']);
+  assert.equal(calls, 2);
+  client.rpc = async () => ({ items: null });
+  assert.deepEqual(await client.listWorkspaceEntries(options), []);
+});
+
 test('HarnessClient lists sessions by workspace accounting in its stored order', async () => {
   const client = new HarnessClient({
     baseUrl: 'http://127.0.0.1:3080',
