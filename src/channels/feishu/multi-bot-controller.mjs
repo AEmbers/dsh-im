@@ -594,7 +594,7 @@ export class MultiBotDshFeishuController {
       this.#assertOpen('capability-unavailable');
       return { version: 1, botId, channel: 'feishu', account,
         connected: isConnected(connectionStatus(this.#runtimes.get(botId))),
-        capabilities: ['proactive-text-checked'] };
+        capabilities: ['proactive-text-checked', 'proactive-receipt-checked'] };
     });
   }
 
