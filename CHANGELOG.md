@@ -6,6 +6,19 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [4.34.3] - 2026-10-04
+
+### Changed
+
+- `dsh.compatibility.dsh`: `"0.1.7-alpha.1"` → `">=0.2.0-rc.1"`.
+- `dsh.compatibility.dshReleases`: was `{"0.1.7-alpha.1": "compatible"}`; now keeps that entry and adds `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-alpha.1` (all `"compatible"`).
+- `engines.dsh` added: `">=0.2.0-rc.1"` (`engines.node` `>=22.19` untouched).
+- `dsh.client.inject`: dropped `@deepseek-ai/dsh-client-runtime`.
+
+For the Desktop-host transition window: the currently shipped Desktop application bundles the **0.2.0-rc.2** core and cannot be upgraded from a profile (the core comes from `app.asar`), so the compatibility window deliberately spans both `0.2.0-rc.2` and `0.2.1-alpha.1` instead of pinning only the newer release.
+
+Verified installed, booted, and mounted on both cores (`C:\Sophia\_compat021` = 0.2.1-alpha.1, `C:\Sophia\_compat020` = 0.2.0-rc.2). No plugin behaviour was changed.
+
 ## [4.34.2] - 2026-10-03
 
 ### Fixed / 修复
